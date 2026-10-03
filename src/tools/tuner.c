@@ -1829,11 +1829,106 @@ static void voice_push(const short *s, DWORD n)
     v_last = now();
 }
 
+/* Decoded voice, made to sound good. dsd-neo hands over 8 kHz speech that stops at 3.5 kHz.
+   1. At 8 kHz: a 200 Hz high-pass (thumps, hum), a +3 dB presence lift at 2 kHz (clearer words),
+      and a level control that brings quiet and loud talkers to the same loudness. It only learns
+      from speech (pauses don't pump it up), and a 5 ms look-ahead backs the gain off before a peak.
+   2. Upsampled to 48 kHz with a 96-tap windowed-sinc (Kaiser) polyphase filter.
+   3. Bandwidth extension: the 2.5-4 kHz band is rectified, which makes its harmonics; the part
+      that lands at 4.2-9 kHz is added back, so the missing top end of the voice is rebuilt.
+   4. A soft limiter, so nothing ever crackles. */
+typedef struct { float b0, b1, b2, a1, a2, z1, z2; } biquad_t;
+enum { BQ_HP, BQ_LP, BQ_PEAK };
+
+static void bq_set(biquad_t *f, int kind, double fs, double hz, double q, double db)
+{
+    double w = 2 * PI * hz / fs, c = cos(w), al = sin(w) / (2 * q), A = pow(10, db / 40);
+    double b0, b1, b2, a0, a1, a2;
+    if (kind == BQ_HP)      { b0 = (1 + c) / 2; b1 = -(1 + c); b2 = b0; a0 = 1 + al; a1 = -2 * c; a2 = 1 - al; }
+    else if (kind == BQ_LP) { b0 = (1 - c) / 2; b1 = 1 - c;    b2 = b0; a0 = 1 + al; a1 = -2 * c; a2 = 1 - al; }
+    else { b0 = 1 + al * A; b1 = -2 * c; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * c; a2 = 1 - al / A; }
+    f->b0 = (float)(b0 / a0); f->b1 = (float)(b1 / a0); f->b2 = (float)(b2 / a0);
+    f->a1 = (float)(a1 / a0); f->a2 = (float)(a2 / a0);
+    f->z1 = f->z2 = 0;
+}
+
+static float bq_run(biquad_t *f, float x)
+{
+    float y = f->b0 * x + f->z1;
+    f->z1 = f->b1 * x - f->a1 * y + f->z2;
+    f->z2 = f->b2 * x - f->a2 * y;
+    return y;
+}
+
+#define VUP 6                                           /* 8 kHz -> 48 kHz */
+#define VTAPS 16                                        /* taps per phase */
+#define VLOOK 40                                        /* 5 ms look-ahead at 8 kHz */
+
+static biquad_t v_hp, v_pres, v_bhp, v_blp, v_xhp1, v_xhp2, v_xlp;
+static float v_poly[VUP][VTAPS], v_hist[VTAPS], v_look[VLOOK];
+static float v_lvl, v_gain = 2.f, v_peak;
+static int v_lookpos;
+
+static void voice_chain_init(void)
+{
+    bq_set(&v_hp, BQ_HP, 8000, 200, 0.707, 0);
+    bq_set(&v_pres, BQ_PEAK, 8000, 2000, 1.0, 3);
+    bq_set(&v_bhp, BQ_HP, 48000, 2500, 0.707, 0);       /* the band whose harmonics are used */
+    bq_set(&v_blp, BQ_LP, 48000, 3800, 0.707, 0);
+    bq_set(&v_xhp1, BQ_HP, 48000, 4200, 0.54, 0);       /* 4th-order high-pass: keep only new highs */
+    bq_set(&v_xhp2, BQ_HP, 48000, 4200, 1.31, 0);
+    bq_set(&v_xlp, BQ_LP, 48000, 9000, 0.707, 0);
+    /* prototype low-pass at 3.8 kHz (48 kHz rate), Kaiser beta 8, split into 6 phases */
+    double h[VUP * VTAPS], sum = 0, mid = (VUP * VTAPS - 1) / 2.0, beta = 8.0;
+    double i0b = 0, t = 1; for (int k = 1; k < 30; k++) { t *= (beta / 2) / k; i0b += t * t; } i0b += 1;
+    for (int n = 0; n < VUP * VTAPS; n++) {
+        double m = n - mid, x = 2 * 3800.0 / 48000 * m;
+        double s = fabs(x) < 1e-9 ? 1 : sin(PI * x) / (PI * x);
+        double r = m / mid, arg = beta * sqrt(1 - r * r > 0 ? 1 - r * r : 0), i0 = 1; t = 1;
+        for (int k = 1; k < 30; k++) { t *= (arg / 2) / k; i0 += t * t; }
+        h[n] = s * i0 / i0b; sum += h[n];
+    }
+    for (int n = 0; n < VUP * VTAPS; n++) v_poly[n % VUP][n / VUP] = (float)(h[n] * VUP / sum);
+}
+
+/* one 8 kHz sample in (-1..1), six 48 kHz samples out (-1..1) */
+static void voice_chain(float x, float *out6)
+{
+    x = bq_run(&v_pres, bq_run(&v_hp, x));
+    /* level: learn from speech only, then back off for any peak coming within 5 ms */
+    float a = fabsf(x);
+    v_peak = a > v_peak ? a : v_peak * 0.9985f;
+    if (x * x > 1e-5f) v_lvl += (x * x - v_lvl) * 0.00083f;
+    if (v_lvl > 1e-5f) {
+        float want = 0.2f / sqrtf(v_lvl);
+        if (want > 4.f) want = 4.f;
+        if (want < 0.5f) want = 0.5f;
+        v_gain += (want - v_gain) * 0.0004f;
+    }
+    float g = v_peak > 0 && v_gain > 0.85f / v_peak ? 0.85f / v_peak : v_gain;
+    float d = v_look[v_lookpos]; v_look[v_lookpos] = x; v_lookpos = (v_lookpos + 1) % VLOOK;
+    d *= g;
+    /* upsample: newest sample first in the history */
+    memmove(v_hist + 1, v_hist, (VTAPS - 1) * sizeof v_hist[0]);
+    v_hist[0] = d;
+    for (int ph = 0; ph < VUP; ph++) {
+        float u = 0;
+        for (int k = 0; k < VTAPS; k++) u += v_poly[ph][k] * v_hist[k];
+        float band = bq_run(&v_blp, bq_run(&v_bhp, u));
+        float hi = bq_run(&v_xlp, bq_run(&v_xhp2, bq_run(&v_xhp1, fabsf(band))));
+        float y = u + 0.6f * hi;
+        if (y > 0.7f) y = 0.7f + 0.3f * tanhf((y - 0.7f) / 0.3f);
+        else if (y < -0.7f) y = -0.7f - 0.3f * tanhf((-y - 0.7f) / 0.3f);
+        out6[ph] = y;
+    }
+}
+
 static DWORD WINAPI voice_thread(LPVOID p)
 {
     (void)p;
     int playing = 0;
     LONGLONG next = now(), step = (LONGLONG)(0.020 * g_qpf);
+    voice_chain_init();
     while (!g_stop) {
         LONG fill = (vw - vr + VRING) % VRING;
         int active = v_last && (now() - v_last) < (LONGLONG)(1.2 * g_qpf);
@@ -1843,12 +1938,17 @@ static DWORD WINAPI voice_thread(LPVOID p)
             else { Sleep(5); continue; }
         }
         if (!active && fill == 0) { playing = 0; continue; }
-        float v = 1.6f * g_volume;
+        float v = 18500.f * g_volume;                     /* as loud as the other modes */
+        static float fade;                                 /* 5 ms in and out: no clicks */
         for (int i = 0; i < 160; i++) {
-            short s = 0;
-            if ((vw - vr + VRING) % VRING) { s = vring[vr]; vr = (vr + 1) % VRING; }
-            s = clip16(s * v);
-            out_frame(&voi, s, s);
+            float x = 0;
+            int have = (vw - vr + VRING) % VRING != 0;
+            if (have) { x = vring[vr] / 32768.f; vr = (vr + 1) % VRING; }
+            fade += have ? (fade < 1 ? 0.025f : 0) : (fade > 0 ? -0.025f : 0);
+            if (fade > 1) fade = 1; if (fade < 0) fade = 0;
+            float y6[VUP];
+            voice_chain(x * fade, y6);
+            for (int k = 0; k < VUP; k++) { short s = clip16(y6[k] * v); out_frame(&voi, s, s); }
         }
         next += step;
         LONGLONG wait = next - now();
@@ -2430,7 +2530,7 @@ static void ds_start(void)
         for (int i = 1; i <= CP_MAX_LSN; i++) if (cp_freq[i] > 0) have_map = 1;
         if (g_trunk_dmr && have_map) snprintf(copt, sizeof copt, "-C \"%s\"", cp_map_path);
         snprintf(cmd, sizeof cmd, "\"%s\" %s -T -i rtltcp:127.0.0.1:%d:%.4fM -o - --stdout-mono --enc-lockout %s %s %s", exe,
-                 g_trunk_dmr ? "-fs" : "-ft", RTLTCP_PORT, g_trunk_cc / 1e6, gopt, copt, extra ? extra : "");
+                 g_trunk_dmr ? "-fs" : "-ft -mq", RTLTCP_PORT, g_trunk_cc / 1e6, gopt, copt, extra ? extra : "");
     }
     else snprintf(cmd, sizeof cmd, "\"%s\" -fa -i - -s 48000 -o - --stdout-mono", exe);
     SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
@@ -4519,7 +4619,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
        HD arrives in bursts from the decoder, so it gets more slack */
     /* up to 10 x 15 ms queued: absorbs the USB hiccup a hardware retune causes during a glide */
     if (!out_open(&ana, FS_AUD, BUF_FRAMES, 10, 3) || !out_open(&hda, 44100, 1102, 16, 4) ||
-        !out_open(&nar, 48012, 720, 10, 3) || !out_open(&voi, 8000, 160, 10, 3)) {   /* fed at a steady pace by voice_thread */
+        !out_open(&nar, 48012, 720, 10, 3) || !out_open(&voi, 48000, 960, 10, 3)) {   /* fed at a steady pace by voice_thread */
         MessageBoxA(NULL, "Cannot open audio output.", "SDR tuner", MB_OK); return 1;
     }
     retune_event = CreateEventW(NULL, FALSE, FALSE, NULL);

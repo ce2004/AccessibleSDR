@@ -5,6 +5,9 @@ name: release
 on:
   push:
     tags: ["v*"]
+    # builds on main publish nothing; they keep the vcpkg cache on main, the only
+    # place a tag build can read it from (caches are scoped to the branch or tag)
+    branches: [main]
   workflow_dispatch:
 
 permissions:

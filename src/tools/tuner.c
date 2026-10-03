@@ -1829,24 +1829,33 @@ static void voice_push(const short *s, DWORD n)
     v_last = now();
 }
 
-/* Decoded voice, made to sound good. dsd-neo hands over 8 kHz speech that stops at 3.5 kHz.
-   1. At 8 kHz: a 200 Hz high-pass (thumps, hum), a +3 dB presence lift at 2 kHz (clearer words),
-      and a level control that brings quiet and loud talkers to the same loudness. It only learns
-      from speech (pauses don't pump it up), and a 5 ms look-ahead backs the gain off before a peak.
-   2. Upsampled to 48 kHz with a 96-tap windowed-sinc (Kaiser) polyphase filter.
+/* Decoded voice, made to sound good. dsd-neo hands over 8 kHz speech: thin below 250 Hz and
+   nothing above 3.5 kHz. With "High quality digital voice" on (Preferences):
+   1. At 8 kHz: a 70 Hz high-pass (rumble), +8 dB low shelf below 250 Hz (the chest and warmth
+      the vocoder leaves thin), +3 dB presence at 2 kHz (clearer words), and a level control that
+      brings quiet and loud talkers to the same loudness. It learns only from speech (pauses don't
+      pump it up), and a 5 ms look-ahead backs the gain off before a peak arrives.
+   2. Resampled to 44.1 kHz: 441 phases of a 16-tap windowed sinc (Kaiser), since 44100/8000 is
+      not a whole number.
    3. Bandwidth extension: the 2.5-4 kHz band is rectified, which makes its harmonics; the part
-      that lands at 4.2-9 kHz is added back, so the missing top end of the voice is rebuilt.
-   4. A soft limiter, so nothing ever crackles. */
+      that lands at 4.2-9 kHz is added back, rebuilding the top end the radio never carried.
+   4. A soft limiter, so nothing ever crackles.
+   Off: the voice is only resampled, at the old fixed gain. */
 typedef struct { float b0, b1, b2, a1, a2, z1, z2; } biquad_t;
-enum { BQ_HP, BQ_LP, BQ_PEAK };
+enum { BQ_HP, BQ_LP, BQ_PEAK, BQ_SHELF };
 
 static void bq_set(biquad_t *f, int kind, double fs, double hz, double q, double db)
 {
-    double w = 2 * PI * hz / fs, c = cos(w), al = sin(w) / (2 * q), A = pow(10, db / 40);
+    double w = 2 * PI * hz / fs, c = cos(w), al = sin(w) / (2 * q), A = pow(10, db / 40), sA = sqrt(A);
     double b0, b1, b2, a0, a1, a2;
     if (kind == BQ_HP)      { b0 = (1 + c) / 2; b1 = -(1 + c); b2 = b0; a0 = 1 + al; a1 = -2 * c; a2 = 1 - al; }
     else if (kind == BQ_LP) { b0 = (1 - c) / 2; b1 = 1 - c;    b2 = b0; a0 = 1 + al; a1 = -2 * c; a2 = 1 - al; }
-    else { b0 = 1 + al * A; b1 = -2 * c; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * c; a2 = 1 - al / A; }
+    else if (kind == BQ_PEAK) { b0 = 1 + al * A; b1 = -2 * c; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * c; a2 = 1 - al / A; }
+    else {                                                  /* low shelf */
+        b0 = A * ((A + 1) - (A - 1) * c + 2 * sA * al); b1 = 2 * A * ((A - 1) - (A + 1) * c);
+        b2 = A * ((A + 1) - (A - 1) * c - 2 * sA * al);
+        a0 = (A + 1) + (A - 1) * c + 2 * sA * al; a1 = -2 * ((A - 1) + (A + 1) * c); a2 = (A + 1) + (A - 1) * c - 2 * sA * al;
+    }
     f->b0 = (float)(b0 / a0); f->b1 = (float)(b1 / a0); f->b2 = (float)(b2 / a0);
     f->a1 = (float)(a1 / a0); f->a2 = (float)(a2 / a0);
     f->z1 = f->z2 = 0;
@@ -1860,67 +1869,80 @@ static float bq_run(biquad_t *f, float x)
     return y;
 }
 
-#define VUP 6                                           /* 8 kHz -> 48 kHz */
+#define VOICE_RATE 44100
+#define VL 441                                          /* 44100 / 8000 = 441 / 80 */
+#define VM 80
 #define VTAPS 16                                        /* taps per phase */
 #define VLOOK 40                                        /* 5 ms look-ahead at 8 kHz */
 
-static biquad_t v_hp, v_pres, v_bhp, v_blp, v_xhp1, v_xhp2, v_xlp;
-static float v_poly[VUP][VTAPS], v_hist[VTAPS], v_look[VLOOK];
+static volatile int g_pref_hq = 1, g_pref_every_call;   /* Preferences (Ctrl+P), saved in prefs.txt */
+static biquad_t v_hp, v_shelf, v_pres, v_bhp, v_blp, v_xhp1, v_xhp2, v_xlp;
+static float v_poly[VL][VTAPS], v_hist[VTAPS], v_look[VLOOK];
 static float v_lvl, v_gain = 2.f, v_peak;
-static int v_lookpos;
+static int v_lookpos, v_acc;
 
 static void voice_chain_init(void)
 {
-    bq_set(&v_hp, BQ_HP, 8000, 200, 0.707, 0);
+    bq_set(&v_hp, BQ_HP, 8000, 70, 0.707, 0);
+    bq_set(&v_shelf, BQ_SHELF, 8000, 250, 0.707, 8);
     bq_set(&v_pres, BQ_PEAK, 8000, 2000, 1.0, 3);
-    bq_set(&v_bhp, BQ_HP, 48000, 2500, 0.707, 0);       /* the band whose harmonics are used */
-    bq_set(&v_blp, BQ_LP, 48000, 3800, 0.707, 0);
-    bq_set(&v_xhp1, BQ_HP, 48000, 4200, 0.54, 0);       /* 4th-order high-pass: keep only new highs */
-    bq_set(&v_xhp2, BQ_HP, 48000, 4200, 1.31, 0);
-    bq_set(&v_xlp, BQ_LP, 48000, 9000, 0.707, 0);
-    /* prototype low-pass at 3.8 kHz (48 kHz rate), Kaiser beta 8, split into 6 phases */
-    double h[VUP * VTAPS], sum = 0, mid = (VUP * VTAPS - 1) / 2.0, beta = 8.0;
-    double i0b = 0, t = 1; for (int k = 1; k < 30; k++) { t *= (beta / 2) / k; i0b += t * t; } i0b += 1;
-    for (int n = 0; n < VUP * VTAPS; n++) {
-        double m = n - mid, x = 2 * 3800.0 / 48000 * m;
-        double s = fabs(x) < 1e-9 ? 1 : sin(PI * x) / (PI * x);
+    bq_set(&v_bhp, BQ_HP, VOICE_RATE, 2500, 0.707, 0);  /* the band whose harmonics are used */
+    bq_set(&v_blp, BQ_LP, VOICE_RATE, 3800, 0.707, 0);
+    bq_set(&v_xhp1, BQ_HP, VOICE_RATE, 4200, 0.54, 0);  /* 4th-order high-pass: keep only new highs */
+    bq_set(&v_xhp2, BQ_HP, VOICE_RATE, 4200, 1.31, 0);
+    bq_set(&v_xlp, BQ_LP, VOICE_RATE, 9000, 0.707, 0);
+    /* prototype low-pass at 3.8 kHz (at 8000 x 441 Hz), Kaiser beta 8, split into 441 phases */
+    static double h[VL * VTAPS];
+    double sum = 0, mid = (VL * VTAPS - 1) / 2.0, beta = 8.0, i0b = 1, t = 1;
+    for (int k = 1; k < 30; k++) { t *= (beta / 2) / k; i0b += t * t; }
+    for (int n = 0; n < VL * VTAPS; n++) {
+        double m = n - mid, x = 2 * 3800.0 / (8000.0 * VL) * m;
+        double s = fabs(x) < 1e-12 ? 1 : sin(PI * x) / (PI * x);
         double r = m / mid, arg = beta * sqrt(1 - r * r > 0 ? 1 - r * r : 0), i0 = 1; t = 1;
         for (int k = 1; k < 30; k++) { t *= (arg / 2) / k; i0 += t * t; }
         h[n] = s * i0 / i0b; sum += h[n];
     }
-    for (int n = 0; n < VUP * VTAPS; n++) v_poly[n % VUP][n / VUP] = (float)(h[n] * VUP / sum);
+    for (int n = 0; n < VL * VTAPS; n++) v_poly[n % VL][n / VL] = (float)(h[n] * VL / sum);
 }
 
-/* one 8 kHz sample in (-1..1), six 48 kHz samples out (-1..1) */
-static void voice_chain(float x, float *out6)
+/* one 8 kHz sample in (-1..1); writes its 5 or 6 44.1 kHz samples (-1..1) to out, returns how many */
+static int voice_chain(float x, float *out)
 {
-    x = bq_run(&v_pres, bq_run(&v_hp, x));
-    /* level: learn from speech only, then back off for any peak coming within 5 ms */
-    float a = fabsf(x);
-    v_peak = a > v_peak ? a : v_peak * 0.9985f;
-    if (x * x > 1e-5f) v_lvl += (x * x - v_lvl) * 0.00083f;
-    if (v_lvl > 1e-5f) {
-        float want = 0.2f / sqrtf(v_lvl);
-        if (want > 4.f) want = 4.f;
-        if (want < 0.5f) want = 0.5f;
-        v_gain += (want - v_gain) * 0.0004f;
-    }
-    float g = v_peak > 0 && v_gain > 0.85f / v_peak ? 0.85f / v_peak : v_gain;
-    float d = v_look[v_lookpos]; v_look[v_lookpos] = x; v_lookpos = (v_lookpos + 1) % VLOOK;
-    d *= g;
-    /* upsample: newest sample first in the history */
+    int hq = g_pref_hq;
+    float d;
+    if (hq) {
+        x = bq_run(&v_pres, bq_run(&v_shelf, bq_run(&v_hp, x)));
+        float a = fabsf(x);
+        v_peak = a > v_peak ? a : v_peak * 0.9985f;
+        if (x * x > 1e-5f) v_lvl += (x * x - v_lvl) * 0.00083f;
+        if (v_lvl > 1e-5f) {
+            float want = 0.24f / sqrtf(v_lvl);
+            if (want > 4.f) want = 4.f;
+            if (want < 0.5f) want = 0.5f;
+            v_gain += (want - v_gain) * 0.0004f;
+        }
+        float g = v_peak > 0 && v_gain > 0.85f / v_peak ? 0.85f / v_peak : v_gain;
+        d = v_look[v_lookpos]; v_look[v_lookpos] = x; v_lookpos = (v_lookpos + 1) % VLOOK;
+        d *= g;
+    } else d = x * 2.83f;                                 /* the old gain (1.6 at full scale) */
     memmove(v_hist + 1, v_hist, (VTAPS - 1) * sizeof v_hist[0]);
     v_hist[0] = d;
-    for (int ph = 0; ph < VUP; ph++) {
+    int n = 0;
+    for (; v_acc < VL; v_acc += VM) {
+        const float *c = v_poly[v_acc];
         float u = 0;
-        for (int k = 0; k < VTAPS; k++) u += v_poly[ph][k] * v_hist[k];
-        float band = bq_run(&v_blp, bq_run(&v_bhp, u));
-        float hi = bq_run(&v_xlp, bq_run(&v_xhp2, bq_run(&v_xhp1, fabsf(band))));
-        float y = u + 0.6f * hi;
-        if (y > 0.7f) y = 0.7f + 0.3f * tanhf((y - 0.7f) / 0.3f);
-        else if (y < -0.7f) y = -0.7f - 0.3f * tanhf((-y - 0.7f) / 0.3f);
-        out6[ph] = y;
+        for (int k = 0; k < VTAPS; k++) u += c[k] * v_hist[k];
+        if (hq) {
+            float band = bq_run(&v_blp, bq_run(&v_bhp, u));
+            float hi = bq_run(&v_xlp, bq_run(&v_xhp2, bq_run(&v_xhp1, fabsf(band))));
+            u += 0.8f * hi;
+            if (u > 0.7f) u = 0.7f + 0.3f * tanhf((u - 0.7f) / 0.3f);
+            else if (u < -0.7f) u = -0.7f - 0.3f * tanhf((-u - 0.7f) / 0.3f);
+        }
+        out[n++] = u;
     }
+    v_acc -= VL;
+    return n;
 }
 
 static DWORD WINAPI voice_thread(LPVOID p)
@@ -1946,9 +1968,9 @@ static DWORD WINAPI voice_thread(LPVOID p)
             if (have) { x = vring[vr] / 32768.f; vr = (vr + 1) % VRING; }
             fade += have ? (fade < 1 ? 0.025f : 0) : (fade > 0 ? -0.025f : 0);
             if (fade > 1) fade = 1; if (fade < 0) fade = 0;
-            float y6[VUP];
-            voice_chain(x * fade, y6);
-            for (int k = 0; k < VUP; k++) { short s = clip16(y6[k] * v); out_frame(&voi, s, s); }
+            float y[8];
+            int ny = voice_chain(x * fade, y);
+            for (int k = 0; k < ny; k++) { short s = clip16(y[k] * v); out_frame(&voi, s, s); }
         }
         next += step;
         LONGLONG wait = next - now();
@@ -1970,7 +1992,13 @@ static DWORD WINAPI ds_voice_reader(LPVOID p)
         if (!ReadFile(h, buf, sizeof buf, &got, NULL) || !got) break;
         /* voice is starting: announce who it is, once per call (control channels mention
            talkgroups constantly, so only real voice triggers an announcement) */
-        if (now() > g_voice_until && ds_call[0] && (strcmp(ds_call, ds_said) || GetTickCount() - ds_said_t > 20000)) {
+        /* "Announce every call" (Preferences): every transmission after 1.5 s of quiet, even the
+           same group again; otherwise once per call, and not the same one again within 20 s */
+        static LONGLONG last_voice;
+        int fresh = g_pref_every_call ? now() - last_voice > (LONGLONG)(1.5 * g_qpf)
+                                      : now() > g_voice_until && (strcmp(ds_call, ds_said) || GetTickCount() - ds_said_t > 20000);
+        last_voice = now();
+        if (fresh && ds_call[0]) {
             snprintf(ds_said, sizeof ds_said, "%s", ds_call);
             ds_said_t = GetTickCount();
             dec_add(ds_said);
@@ -3856,6 +3884,67 @@ static void out_path(wchar_t *p, size_t n)
     if (s) wcscpy_s(s + 1, n - (s + 1 - p), L"outdev.txt");
 }
 
+/* ---------- Ctrl+P: Preferences, a spoken list (prefs.txt beside presets.txt) ---------- */
+static int g_prefs, g_pref_idx;
+static volatile int *const pref_vals[] = { &g_pref_hq, &g_pref_every_call };
+static const char *const pref_keys[] = { "hq_digital_voice", "announce_every_call" };
+static const char *const pref_names[] = { "High quality digital voice: 44.1 kilohertz, fuller low end, rebuilt highs, even loudness",
+                                          "Announce every call on digital systems" };
+#define NPREFS 2
+
+static void prefs_path(char *p, size_t n)
+{
+    snprintf(p, n, "%s", saved_path); strcpy(strrchr(p, '\\') + 1, "prefs.txt");
+}
+
+static void prefs_load(void)
+{
+    char p[MAX_PATH], line[128], key[64]; int v;
+    prefs_path(p, sizeof p);
+    FILE *fp = fopen(p, "r");
+    while (fp && fgets(line, sizeof line, fp))
+        if (sscanf(line, "%63s %d", key, &v) == 2)
+            for (int i = 0; i < NPREFS; i++) if (!strcmp(key, pref_keys[i])) *pref_vals[i] = v != 0;
+    if (fp) fclose(fp);
+}
+
+static void prefs_save(void)
+{
+    char p[MAX_PATH]; prefs_path(p, sizeof p);
+    FILE *fp = fopen(p, "w");
+    if (!fp) return;
+    for (int i = 0; i < NPREFS; i++) fprintf(fp, "%s %d\n", pref_keys[i], *pref_vals[i]);
+    fclose(fp);
+}
+
+static void prefs_say(void)
+{
+    char t[300];
+    snprintf(t, sizeof t, "%s, %s, %d of %d", pref_names[g_pref_idx], *pref_vals[g_pref_idx] ? "on" : "off", g_pref_idx + 1, NPREFS);
+    say(t);
+}
+
+static void prefs_open(void)
+{
+    g_prefs = 1; g_pref_idx = 0;
+    say("Preferences. Up and Down to move, Space to change, Escape to close.");
+    prefs_say();
+}
+
+static void prefs_key(WPARAM wp)
+{
+    if (wp == VK_UP) { if (g_pref_idx > 0) g_pref_idx--; else beep(0); prefs_say(); }
+    else if (wp == VK_DOWN) { if (g_pref_idx < NPREFS - 1) g_pref_idx++; else beep(0); prefs_say(); }
+    else if (wp == VK_HOME) { g_pref_idx = 0; prefs_say(); }
+    else if (wp == VK_END) { g_pref_idx = NPREFS - 1; prefs_say(); }
+    else if (wp == VK_SPACE || wp == VK_RETURN) {
+        *pref_vals[g_pref_idx] = !*pref_vals[g_pref_idx];
+        prefs_save();
+        beep(3); say(*pref_vals[g_pref_idx] ? "On" : "Off");
+    }
+    else if (wp == VK_ESCAPE) { g_prefs = 0; say("Preferences closed"); }
+}
+
 /* ---------- O: the output device picker ---------- */
 static int g_picker, g_pick_idx, g_pick_n;              /* entry 0 is the Windows default */
 static wchar_t g_pick_names[MAX_OUTS][160];
@@ -4046,6 +4135,8 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         int repeat = (lp >> 30) & 1, shift = GetKeyState(VK_SHIFT) < 0;
         mode_params(g_mode, g_station, &tap, &fine, &glide, &gmax);
         if (g_picker) { picker_key(wp); return 0; }       /* the output device picker has the keys */
+        if (g_prefs) { prefs_key(wp); return 0; }         /* so does Preferences */
+        if (wp == 'P' && GetKeyState(VK_CONTROL) < 0) { prefs_open(); return 0; }
         if (wp == 'O') { picker_open(); return 0; }
         if (wp == 'S') {
             if (shift) { g_squelch = (g_squelch + 1) % 4; say(squelch_names[g_squelch]); return 0; }
@@ -4475,6 +4566,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     load_presets();
     load_lockouts();
     out_load();                                     /* the output device chosen with O, if still present */
+    prefs_load();
     CreateThread(NULL, 0, location_thread, (LPVOID)saved_path, 0, NULL);
     int test_run = cmd && !strncmp(cmd, "--", 2);
     if (!test_run) CreateThread(NULL, 0, update_thread, NULL, 0, NULL);
@@ -4619,7 +4711,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
        HD arrives in bursts from the decoder, so it gets more slack */
     /* up to 10 x 15 ms queued: absorbs the USB hiccup a hardware retune causes during a glide */
     if (!out_open(&ana, FS_AUD, BUF_FRAMES, 10, 3) || !out_open(&hda, 44100, 1102, 16, 4) ||
-        !out_open(&nar, 48012, 720, 10, 3) || !out_open(&voi, 48000, 960, 10, 3)) {   /* fed at a steady pace by voice_thread */
+        !out_open(&nar, 48012, 720, 10, 3) || !out_open(&voi, VOICE_RATE, VOICE_RATE / 50, 10, 3)) {   /* fed at a steady pace by voice_thread */
         MessageBoxA(NULL, "Cannot open audio output.", "SDR tuner", MB_OK); return 1;
     }
     retune_event = CreateEventW(NULL, FALSE, FALSE, NULL);

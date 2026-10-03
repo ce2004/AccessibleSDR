@@ -27,3 +27,4 @@ talkgroups.csv
 *.iq
 *.wav
 __pycache__/
+prefs.txt

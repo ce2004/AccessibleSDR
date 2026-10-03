@@ -439,7 +439,7 @@ static void freq_text(char *out, size_t n, double hz)
 static volatile float g_volume;                         /* (defined with the shared state) */
 
 /* three instrument voices; g_sfx_style picks one (0 electric piano, 1 marimba, 2 soft chime) */
-static volatile int g_sfx_style = 2;                    /* Conner chose the soft chime (2026-10-03) */
+static volatile int g_sfx_style = 2;                    /* the soft chime is the chosen default */
 
 static void piano_note(float *lr, int len, double t0, double freq, double amp, double pan, double length)
 {
@@ -3606,7 +3606,7 @@ static int input_box(HWND parent, const wchar_t *title, const wchar_t *label, ch
     return DialogBoxIndirectW(GetModuleHandleW(NULL), dt, parent, ib_proc) == 1;
 }
 
-/* "67202" (a US ZIP code) or "37.69 -97.33" / "37.69, -97.33" (latitude longitude) */
+/* "12345" (a US ZIP code) or "40.0 -90.0" / "40.0, -90.0" (latitude longitude) */
 static int set_location(const char *text, char *said, size_t n)
 {
     double la = 0, lo = 0; int ok = 0;
@@ -3614,7 +3614,7 @@ static int set_location(const char *text, char *said, size_t n)
     for (char *c = t; *c; c++) if (*c == ',' || *c == '\t' || *c == '\r' || *c == '\n') *c = ' ';
     char *s = t; while (*s == ' ') s++;
     for (size_t L = strlen(s); L && s[L - 1] == ' '; ) s[--L] = 0;          /* trim both ends */
-    int zip = strlen(s) >= 5 && !strchr(s, '.');                            /* 67202 or 67202-1234 */
+    int zip = strlen(s) >= 5 && !strchr(s, '.');                            /* 12345 or 12345-6789 */
     for (int i = 0; zip && i < 5; i++) if (!isdigit((unsigned char)s[i])) zip = 0;
     if (zip && s[5] && s[5] != '-') zip = 0;
     if (zip) {

@@ -1,8 +1,8 @@
 """Feed a raw 48k s16le file into dsd-neo through a real pipe, in small paced chunks
 (like a live radio app would), and collect stdout audio as it arrives."""
-import subprocess, sys, threading, time
+import os, subprocess, sys, threading, time
 
-exe = r"C:\Users\Conner\Documents\SDR\bin\dsd-neo.exe"
+exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "bin", "dsd-neo.exe")
 src = sys.argv[1]
 speed = float(sys.argv[2]) if len(sys.argv) > 2 else 4.0
 data = open(src, "rb").read()

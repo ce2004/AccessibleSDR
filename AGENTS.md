@@ -1,7 +1,7 @@
 # Working on AccessibleSDR (guide for AI agents and contributors)
 
 ## What this is
-A receive-only, screen-reader-first SDR app for Windows (x64 and ARM64). The user is blind and uses NVDA: every action must be keyboard-driven and spoken; nothing may depend on seeing the screen. It supports RTL-SDR dongles (librtlsdr, rtl-sdr-blog fork) and SDRplay RSPs (SDRplay API, loaded at run time).
+A receive-only, screen-reader-first SDR app for Windows (x64 and ARM64), built for NVDA users: every action must be keyboard-driven and spoken; nothing may depend on seeing the screen. It supports RTL-SDR dongles (librtlsdr, rtl-sdr-blog fork) and SDRplay RSPs (SDRplay API, loaded at run time).
 
 ## Layout
 - `src/tools/tuner.c`: **the whole app**, a single Win32 C file. Sections in order: presets and categories, speech (NVDA controller client), sound effects (synthesised chimes), audio output (waveOut), HD Radio (libnrsc5), wide-FM stereo plus RDS, narrow modes (AM, NFM, SSB, CW), spectrum, squelch and scanner, Explore (channel-map survey), decoder children (multimon-ng, dsd-neo, rtl_433, AIS-catcher, acarsdec, decode_ft8), ADS-B (in-app), trunk following (rtl_tcp server on 1234 for dsd-neo), driver installer, updater, the radio layer (`rad_*` wrappers, RTL and SDRplay), the window and keys, and WinMain.
@@ -20,7 +20,7 @@ A receive-only, screen-reader-first SDR app for Windows (x64 and ARM64). The use
 After editing anything under `src/<upstream>/`, run `python tools\export-patches.py` and commit the updated patch. Never commit the upstream clones or the SDRplay headers (their licence forbids it).
 
 ## Test switches (tuner.exe)
-Test runs start minimized, so they never take the user's keyboard. Their logs go next to `presets.txt`.
+Test runs start minimized, so they never take the keyboard from someone using the app. Their logs go next to `presets.txt`.
 - `--listen <MHz> <WFM|AM|NFM|USB|LSB|CW> <seconds>`: tune and listen. Writes `rds_test.log` and `glide_test.log` (audio underruns and drops).
 - `--glide <MHz> <mode> <dir> <seconds>`: simulate holding an arrow key.
 - `--explore <MHz> <seconds>`: press X in that frequency's category. Results go to `found.txt`.
@@ -28,10 +28,10 @@ Test runs start minimized, so they never take the user's keyboard. Their logs go
 - `--sounds` (play every sound effect), `--zip <text>`, `--driver-check`, `--install-driver` (elevated).
 - Set `SDR_NO_UPDATE=1` to skip the update check.
 
-## Ground rules from the user (keep these)
+## Project rules (keep these)
 - **Receive only.** Nothing may transmit.
 - **Every test must be audible** on the default audio device. No silent decodes to files. Volume defaults to **30%**.
-- **The user always chooses:** never auto-switch stereo to mono or analog to HD. Announce what's available instead.
+- **The listener always chooses:** never auto-switch stereo to mono or analog to HD. Announce what's available instead.
 - **Holding an arrow key glides at one constant speed** (Ctrl is 10x, Shift is 0.1x). No acceleration. It must sound analog: no gaps or lag.
 - **X (Explore) must be very fast** and use real channel maps (FM 87.9-107.9 every 200 kHz, AM 540-1700 every 10 kHz, or a category's official channels). It must never pick bleed, mirror images or random noise.
 - **Nothing location-specific** in shipped data. Location comes from Z (ZIP code) or Windows Location.

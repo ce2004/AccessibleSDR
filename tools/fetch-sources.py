@@ -23,6 +23,16 @@ for line in open(os.path.join(root, "patches", "sources.txt")):
     if os.path.exists(patch):
         run("git", "-C", dst, "apply", "--whitespace=nowarn", patch)
 
+# SDRplay API headers (their licence doesn't allow committing them here); tuner.exe loads
+# sdrplay_api.dll at run time from the user's own SDRplay API install
+sp = os.path.join(root, "deps", "sdrplay")
+os.makedirs(sp, exist_ok=True)
+for h in ["sdrplay_api.h", "sdrplay_api_callback.h", "sdrplay_api_control.h", "sdrplay_api_dev.h",
+          "sdrplay_api_rsp1a.h", "sdrplay_api_rsp2.h", "sdrplay_api_rspDuo.h", "sdrplay_api_rspDx.h",
+          "sdrplay_api_rx_channel.h", "sdrplay_api_tuner.h"]:
+    if not os.path.exists(os.path.join(sp, h)):
+        urllib.request.urlretrieve("https://raw.githubusercontent.com/srcejon/sdrplayapi/master/inc/" + h, os.path.join(sp, h))
+
 # llvm-mingw (clang for the POSIX-style projects; one toolchain targets both ARM64 and x64),
 # in the build of the machine we're running on
 import platform

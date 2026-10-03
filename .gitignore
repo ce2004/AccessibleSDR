@@ -6,6 +6,7 @@
 /bin/
 /bin-x64/
 /release/
+/deps/sdrplay/
 /src/*/
 !/src/tools/
 !/src/aoshim/

@@ -22,6 +22,7 @@
 #include <shellapi.h>
 #include "rtl-sdr.h"
 #include "nrsc5.h"
+#include "sdrplay_api.h"          /* types only: the SDRplay DLL is loaded at run time if installed */
 
 #define WSTR2(x) L##x
 #define WSTR(x) WSTR2(x)
@@ -357,7 +358,17 @@ static volatile float g_volume = 0.30f;
 static volatile LONG g_stop;
 static double g_qpf;
 static HWND g_wnd;
-static rtlsdr_dev_t *volatile dev;
+static rtlsdr_dev_t *volatile dev;      /* non-NULL while a radio is open (a placeholder for SDRplay) */
+
+/* one set of radio controls for both kinds of radio (defined with the SDRplay code below) */
+static volatile int g_rsp;               /* the open radio is an SDRplay RSP */
+static void rad_freq(uint32_t hz);
+static void rad_rate(uint32_t rate);
+static void rad_gain(int tenths_db);     /* RTL-SDR only: the RSP runs its own gain control */
+static void rad_gain_mode(int manual);
+static void rad_agc(int on);
+static void rad_ppm(int ppm);
+static void rad_cancel(void);
 
 #define CAT_LO (cats[g_cat].lo)
 #define CAT_HI (cats[g_cat].hi)
@@ -2196,7 +2207,7 @@ static DWORD WINAPI rtltcp_thread(LPVOID p)
            (dB, or "auto" to let dsd-neo decide). */
         const char *fg = getenv("SDR_TRUNK_GAIN");
         int fixed_gain = fg && !_stricmp(fg, "auto") ? 0 : fg && atof(fg) > 0 ? (int)(atof(fg) * 10 + 0.5) : 402;
-        if (fixed_gain) { rtlsdr_set_tuner_gain_mode(dev, 1); rtlsdr_set_tuner_gain(dev, fixed_gain); }
+        if (fixed_gain) { rad_gain_mode(1); rad_gain(fixed_gain); }
         g_tcp_client = c;
         CloseHandle(CreateThread(NULL, 0, tcp_sender, (LPVOID)(UINT_PTR)c, 0, NULL));
         unsigned char cmd[5]; int have = 0;
@@ -2207,19 +2218,18 @@ static DWORD WINAPI rtltcp_thread(LPVOID p)
             if (have < 5) continue;
             have = 0;
             uint32_t v = ((uint32_t)cmd[1] << 24) | (cmd[2] << 16) | (cmd[3] << 8) | cmd[4];
-            rtlsdr_dev_t *d = dev;
-            if (!d) continue;
+            if (!dev) continue;
             switch (cmd[0]) {
             case 0x01:                                         /* dsd-neo tunes a quarter sample rate above the channel */
-                rtlsdr_set_center_freq(d, v); g_tcp_center = v;
+                rad_freq(v); g_tcp_center = v;
                 g_station = floor((v - g_tcp_rate / 4) / 6250 + 0.5) * 6250;
                 PostMessageW(g_wnd, WM_APP + 3, 0, 0); break;
-            case 0x02: rtlsdr_set_sample_rate(d, v); g_tcp_rate = v; break;
-            case 0x03: if (!fixed_gain) rtlsdr_set_tuner_gain_mode(d, (int)v); break;
-            case 0x04: if (!fixed_gain) rtlsdr_set_tuner_gain(d, (int)v); break;
-            case 0x05: rtlsdr_set_freq_correction(d, (int)v); break;
-            case 0x08: if (!fixed_gain) rtlsdr_set_agc_mode(d, (int)v); break;
-            case 0x0d: if (!fixed_gain && (int)v < ngains) rtlsdr_set_tuner_gain(d, gains[v]); break;
+            case 0x02: rad_rate(v); g_tcp_rate = v; break;
+            case 0x03: if (!fixed_gain) rad_gain_mode((int)v); break;
+            case 0x04: if (!fixed_gain) rad_gain((int)v); break;
+            case 0x05: rad_ppm((int)v); break;
+            case 0x08: if (!fixed_gain) rad_agc((int)v); break;
+            case 0x0d: if (!fixed_gain && (int)v < ngains) rad_gain(gains[v]); break;
             default: break;                                    /* others don't apply to the V4 */
             }
         }
@@ -2402,7 +2412,8 @@ static int install_driver(void)
                 if (!SetupDiGetDriverInfoDetailW(set, &dev, &drv, dt, sizeof buf, NULL)) continue;
                 if (_wcsicmp(dt->HardwareID, L"USB\\MS_COMP_WINUSB")) continue;
                 BOOL reboot = FALSE;
-                rc = DiInstallDevice(NULL, set, &dev, &drv, 0, &reboot) ? 0 : 3;
+                /* DiInstallDevice exists only in Unicode form; the header's type follows the A/W setting */
+                rc = DiInstallDevice(NULL, set, &dev, (PSP_DRVINFO_DATA)(void *)&drv, 0, &reboot) ? 0 : 3;
                 break;
             }
         }
@@ -3114,7 +3125,7 @@ static HANDLE dsp_event;
 static void CALLBACK_cb(unsigned char *buf, uint32_t len, void *ctx)
 {
     (void)ctx;
-    if (g_stop) { rtlsdr_cancel_async(dev); return; }
+    if (g_stop) { rad_cancel(); return; }
     tcp_push(buf, len);                                    /* trunk following: raw IQ to dsd-neo */
     uint32_t w = (uint32_t)raw_w, first = len < RAW_RING - w ? len : RAW_RING - w;
     memcpy(raw_ring + w, buf, first);
@@ -3136,14 +3147,14 @@ static void process_block(unsigned char *buf, uint32_t len)
     if (g_restore_normal && dev && !g_adsb_switch) {
         g_restore_normal = 0;
         g_adsb_want = want_adsb; g_adsb_switch = 1;
-        rtlsdr_cancel_async(dev);
+        rad_cancel();
         return;
     }
     /* aircraft mode near 1090 MHz with decoders on: the radio thread reopens at 2 MS/s */
     if (want_adsb != g_adsb && !g_adsb_switch && dev) {
         g_adsb_want = want_adsb; g_adsb_switch = 1;
         PostMessageW(g_wnd, WM_APP + 5, want_adsb, 0);
-        rtlsdr_cancel_async(dev);
+        rad_cancel();
         return;
     }
     if (g_adsb) { adsb_process(buf, len); return; }
@@ -3268,17 +3279,191 @@ static DWORD WINAPI process_thread(LPVOID p)
 
 static volatile int g_gain_applied = -1;
 
+/* ---------- SDRplay RSP support (RSP1, RSP1A, RSP1B, RSP2, RSPdx, RSPduo tuner A) ----------
+   Uses SDRplay's own API service, installed separately from sdrplay.com; nothing of theirs is
+   bundled. The RSP's 14-bit samples are scaled into the same 8-bit form the rest of the app
+   uses, with the RSP's IF gain control keeping the level steady, and its broadcast AM/FM notch
+   filter switched in whenever we're tuned outside those bands. */
+typedef sdrplay_api_ErrT (*rsp_void_fn)(void);
+typedef sdrplay_api_ErrT (*rsp_ver_fn)(float *);
+typedef sdrplay_api_ErrT (*rsp_getdev_fn)(sdrplay_api_DeviceT *, unsigned int *, unsigned int);
+typedef sdrplay_api_ErrT (*rsp_dev_fn)(sdrplay_api_DeviceT *);
+typedef sdrplay_api_ErrT (*rsp_params_fn)(HANDLE, sdrplay_api_DeviceParamsT **);
+typedef sdrplay_api_ErrT (*rsp_init_fn)(HANDLE, sdrplay_api_CallbackFnsT *, void *);
+typedef sdrplay_api_ErrT (*rsp_uninit_fn)(HANDLE);
+typedef sdrplay_api_ErrT (*rsp_update_fn)(HANDLE, sdrplay_api_TunerSelectT, sdrplay_api_ReasonForUpdateT, sdrplay_api_ReasonForUpdateExtension1T);
+static struct {
+    HMODULE dll; int api_open;
+    rsp_void_fn Open, Close, Lock, Unlock; rsp_ver_fn ApiVersion; rsp_getdev_fn GetDevices;
+    rsp_dev_fn Select, Release; rsp_params_fn GetParams; rsp_init_fn Init; rsp_uninit_fn Uninit; rsp_update_fn Update;
+} R;
+static sdrplay_api_DeviceT rsp_dev;
+static sdrplay_api_DeviceParamsT *rsp_par;
+static HANDLE rsp_stop_event;
+static volatile int rsp_streaming, rsp_removed;
+static unsigned char *rsp_buf; static unsigned int rsp_cap;
+
+static void CALLBACK_cb(unsigned char *buf, uint32_t len, void *ctx);
+
+static int rsp_load(void)
+{
+    if (R.dll) return 1;
+    static const wchar_t *paths[] = {
+        L"sdrplay_api.dll",
+#if defined(_M_ARM64)
+        L"C:\\Program Files\\SDRplay\\API\\arm64\\sdrplay_api.dll",
+#else
+        L"C:\\Program Files\\SDRplay\\API\\x64\\sdrplay_api.dll",
+#endif
+        L"C:\\Program Files\\SDRplay\\API\\sdrplay_api.dll" };
+    for (int i = 0; i < 3 && !R.dll; i++) R.dll = LoadLibraryW(paths[i]);
+    if (!R.dll) return 0;
+#define RSPF(field, type, name) R.field = (type)GetProcAddress(R.dll, name)
+    RSPF(Open, rsp_void_fn, "sdrplay_api_Open"); RSPF(Close, rsp_void_fn, "sdrplay_api_Close");
+    RSPF(Lock, rsp_void_fn, "sdrplay_api_LockDeviceApi"); RSPF(Unlock, rsp_void_fn, "sdrplay_api_UnlockDeviceApi");
+    RSPF(ApiVersion, rsp_ver_fn, "sdrplay_api_ApiVersion"); RSPF(GetDevices, rsp_getdev_fn, "sdrplay_api_GetDevices");
+    RSPF(Select, rsp_dev_fn, "sdrplay_api_SelectDevice"); RSPF(Release, rsp_dev_fn, "sdrplay_api_ReleaseDevice");
+    RSPF(GetParams, rsp_params_fn, "sdrplay_api_GetDeviceParams"); RSPF(Init, rsp_init_fn, "sdrplay_api_Init");
+    RSPF(Uninit, rsp_uninit_fn, "sdrplay_api_Uninit"); RSPF(Update, rsp_update_fn, "sdrplay_api_Update");
+#undef RSPF
+    if (!R.Open || !R.Close || !R.Lock || !R.Unlock || !R.GetDevices || !R.Select || !R.Release || !R.GetParams ||
+        !R.Init || !R.Uninit || !R.Update) { FreeLibrary(R.dll); memset(&R, 0, sizeof R); return 0; }
+    return 1;
+}
+
+static sdrplay_api_RxChannelParamsT *rsp_ch(void) { return rsp_par ? rsp_par->rxChannelA : NULL; }
+static int rsp_is_1a(void) { return rsp_dev.hwVer == SDRPLAY_RSP1A_ID || rsp_dev.hwVer == SDRPLAY_RSP1B_ID; }
+
+/* sample rate as the RSP understands it: its converter runs 2 to 10.66 MS/s, so lower rates use
+   its decimator (2 or 4) */
+static void rsp_rate_params(uint32_t rate)
+{
+    sdrplay_api_RxChannelParamsT *ch = rsp_ch();
+    if (!ch || !rsp_par->devParams) return;
+    int dec = rate >= 2000000 ? 1 : rate * 2 >= 2000000 ? 2 : 4;
+    rsp_par->devParams->fsFreq.fsHz = (double)rate * dec;
+    ch->ctrlParams.decimation.enable = dec > 1;
+    ch->ctrlParams.decimation.decimationFactor = (unsigned char)dec;
+    ch->ctrlParams.decimation.wideBandSignal = 1;
+    ch->tunerParams.bwType = sdrplay_api_BW_1_536;
+    ch->tunerParams.ifType = sdrplay_api_IF_Zero;
+}
+
+/* the broadcast AM/FM notch removes those bands entirely: on except when we're listening to them */
+static int rsp_notch_for(uint32_t hz) { return !((hz >= 85e6 && hz <= 110e6) || (hz >= 0.4e6 && hz <= 2.0e6)); }
+
+static void rsp_stream_cb(short *xi, short *xq, sdrplay_api_StreamCbParamsT *p, unsigned int n, unsigned int reset, void *ctx)
+{
+    (void)p; (void)reset; (void)ctx;
+    if (!n) return;
+    if (rsp_cap < n * 2) { free(rsp_buf); rsp_cap = n * 2; rsp_buf = malloc(rsp_cap); if (!rsp_buf) { rsp_cap = 0; return; } }
+    /* IF gain control holds the signal near -30 dBFS (rms about 1040): four times that maps to
+       the 8-bit range, leaving headroom for peaks */
+    const float k = 127.0f / 4150.0f;
+    for (unsigned int i = 0; i < n; i++) {
+        float a = 127.5f + xi[i] * k, b = 127.5f + xq[i] * k;
+        rsp_buf[2 * i] = (unsigned char)(a < 0 ? 0 : a > 255 ? 255 : a);
+        rsp_buf[2 * i + 1] = (unsigned char)(b < 0 ? 0 : b > 255 ? 255 : b);
+    }
+    CALLBACK_cb(rsp_buf, n * 2, NULL);
+}
+
+static void rsp_event_cb(sdrplay_api_EventT id, sdrplay_api_TunerSelectT t, sdrplay_api_EventParamsT *p, void *ctx)
+{
+    (void)t; (void)p; (void)ctx;
+    if (id == sdrplay_api_DeviceRemoved || id == sdrplay_api_DeviceFailure) { rsp_removed = 1; SetEvent(rsp_stop_event); }
+}
+
+/* opens the first RSP found; returns 1 on success */
+static int rsp_open(void)
+{
+    if (!rsp_load()) return 0;
+    if (!R.api_open) { if (R.Open() != sdrplay_api_Success) return 0; R.api_open = 1; }
+    sdrplay_api_DeviceT devs[4]; unsigned int n = 0;
+    R.Lock();
+    if (R.GetDevices(devs, &n, 4) != sdrplay_api_Success || n == 0) { R.Unlock(); return 0; }
+    rsp_dev = devs[0];
+    if (rsp_dev.hwVer == SDRPLAY_RSPduo_ID) { rsp_dev.tuner = sdrplay_api_Tuner_A; rsp_dev.rspDuoMode = sdrplay_api_RspDuoMode_Single_Tuner; }
+    sdrplay_api_ErrT e = R.Select(&rsp_dev);
+    R.Unlock();
+    if (e != sdrplay_api_Success) return 0;
+    if (R.GetParams(rsp_dev.dev, &rsp_par) != sdrplay_api_Success || !rsp_ch()) { R.Release(&rsp_dev); return 0; }
+    sdrplay_api_RxChannelParamsT *ch = rsp_ch();
+    ch->tunerParams.gain.gRdB = 40;
+    ch->tunerParams.gain.LNAstate = 3;                     /* moderate front-end gain; the IF AGC does the rest */
+    ch->tunerParams.gain.minGr = sdrplay_api_NORMAL_MIN_GR;
+    ch->ctrlParams.agc.enable = sdrplay_api_AGC_50HZ;
+    ch->ctrlParams.agc.setPoint_dBfs = -30;
+    ch->ctrlParams.dcOffset.DCenable = 1;
+    ch->ctrlParams.dcOffset.IQenable = 1;
+    if (!rsp_stop_event) rsp_stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    return 1;
+}
+
+static void rsp_close(void)
+{
+    if (rsp_par) R.Release(&rsp_dev);
+    rsp_par = NULL;
+}
+
+/* streams until cancelled or unplugged (like rtlsdr_read_async) */
+static void rsp_stream(void)
+{
+    sdrplay_api_CallbackFnsT cb = { rsp_stream_cb, NULL, rsp_event_cb };
+    ResetEvent(rsp_stop_event);
+    rsp_removed = 0;
+    if (R.Init(rsp_dev.dev, &cb, NULL) != sdrplay_api_Success) { Sleep(500); return; }
+    rsp_streaming = 1;
+    WaitForSingleObject(rsp_stop_event, INFINITE);
+    rsp_streaming = 0;
+    R.Uninit(rsp_dev.dev);
+}
+
+/* settings before streaming go into the parameter block; while streaming, through Update */
+static void rsp_update(sdrplay_api_ReasonForUpdateT why)
+{
+    if (rsp_streaming) R.Update(rsp_dev.dev, sdrplay_api_Tuner_A, why, sdrplay_api_Update_Ext1_None);
+}
+
+static void rad_freq(uint32_t hz)
+{
+    if (!g_rsp) { if (dev) rtlsdr_set_center_freq(dev, hz); return; }
+    sdrplay_api_RxChannelParamsT *ch = rsp_ch();
+    if (!ch) return;
+    ch->tunerParams.rfFreq.rfHz = hz;
+    rsp_update(sdrplay_api_Update_Tuner_Frf);
+    if (rsp_is_1a() && rsp_par->devParams) {
+        unsigned char notch = (unsigned char)rsp_notch_for(hz);
+        if (rsp_par->devParams->rsp1aParams.rfNotchEnable != notch) {
+            rsp_par->devParams->rsp1aParams.rfNotchEnable = notch;
+            rsp_update(sdrplay_api_Update_Rsp1a_RfNotchControl);
+        }
+    }
+}
+
+static void rad_rate(uint32_t rate)
+{
+    if (!g_rsp) { if (dev) rtlsdr_set_sample_rate(dev, rate); return; }
+    rsp_rate_params(rate);
+    rsp_update((sdrplay_api_ReasonForUpdateT)(sdrplay_api_Update_Dev_Fs | sdrplay_api_Update_Ctrl_Decimation));
+}
+
+static void rad_gain(int tenths) { if (!g_rsp && dev) rtlsdr_set_tuner_gain(dev, tenths); }
+static void rad_gain_mode(int manual) { if (!g_rsp && dev) rtlsdr_set_tuner_gain_mode(dev, manual); }
+static void rad_agc(int on) { if (!g_rsp && dev) rtlsdr_set_agc_mode(dev, on); }
+static void rad_ppm(int ppm) { if (!g_rsp && dev) rtlsdr_set_freq_correction(dev, ppm); }
+static void rad_cancel(void) { if (g_rsp) SetEvent(rsp_stop_event); else if (dev) rtlsdr_cancel_async(dev); }
+
 static DWORD WINAPI retune_thread(LPVOID p)
 {
     (void)p;
     while (!g_stop) {
         if (WaitForSingleObject(retune_event, 200) != WAIT_OBJECT_0) continue;
-        rtlsdr_dev_t *d = dev;
-        if (!d) continue;
+        if (!dev) continue;
         int g = (g_gain_idx >= 0 && ngains) ? gains[g_gain_idx] : gain_for(g_mode, g_station);
-        if (g != g_gain_applied) { rtlsdr_set_tuner_gain(d, g); g_gain_applied = g; }
+        if (g != g_gain_applied) { rad_gain(g); g_gain_applied = g; }
         if (!g_retune_pending || g_switch_at) continue;      /* gain-only wakeup */
-        rtlsdr_set_center_freq(d, (uint32_t)(g_lo_next + 0.5));
+        rad_freq((uint32_t)(g_lo_next + 0.5));
         g_retunes++;
         /* samples already in the ring, plus a few USB transfers in flight, were captured at
            the old frequency */
@@ -3293,45 +3478,58 @@ static DWORD WINAPI radio_thread(LPVOID p)
 {
     (void)p;
     int announced_missing = 0, ever_connected = 0;
+    static char rsp_placeholder_unused;
     while (!g_stop) {
         rtlsdr_dev_t *d = NULL;
+        int rsp = 0;
         if (rtlsdr_get_device_count() == 0 || rtlsdr_open(&d, 0) < 0) {
-            if (driver_state() == 2) { PostMessageW(g_wnd, WM_APP + 7, 0, 0); Sleep(3000); continue; }   /* needs its driver */
-            if (!announced_missing) { say("Radio not found. Trying again every 2 seconds."); beep(4); announced_missing = 1; }
-            for (int k = 0; k < 20 && !g_stop; k++) Sleep(100);
-            continue;
+            d = NULL;
+            if (driver_state() == 2) { PostMessageW(g_wnd, WM_APP + 7, 0, 0); Sleep(3000); continue; }   /* RTL needs its driver */
+            rsp = rsp_open();                                  /* no RTL-SDR: an SDRplay RSP? */
+            if (!rsp) {
+                if (!announced_missing) { say("Radio not found. Trying again every 2 seconds."); beep(4); announced_missing = 1; }
+                for (int k = 0; k < 20 && !g_stop; k++) Sleep(100);
+                continue;
+            }
         }
-        rtlsdr_set_tuner_gain_mode(d, 1);
-        ngains = rtlsdr_get_tuner_gains(d, gains);
-        if (ngains < 0 || ngains > 64) ngains = 0;
-        if (ngains && g_gain_idx < 0) g_gain_idx = nearest_gain(gain_for(g_mode, g_station));
-        dev = d;
-        if (announced_missing || ever_connected) { beep(3); say("Radio connected"); }
+        g_rsp = rsp;
+        if (rsp) {
+            ngains = 0;                                        /* the RSP's own gain control replaces ours */
+            dev = (rtlsdr_dev_t *)&rsp_placeholder_unused;     /* "a radio is open"; never passed to librtlsdr */
+        } else {
+            rtlsdr_set_tuner_gain_mode(d, 1);
+            ngains = rtlsdr_get_tuner_gains(d, gains);
+            if (ngains < 0 || ngains > 64) ngains = 0;
+            if (ngains && g_gain_idx < 0) g_gain_idx = nearest_gain(gain_for(g_mode, g_station));
+            dev = d;
+        }
+        if (announced_missing || ever_connected || rsp) { beep(3); say(rsp ? "SDRplay radio connected" : "Radio connected"); }
         announced_missing = 0; ever_connected = 1;
         for (;;) {
             if (g_adsb_want) {                                 /* aircraft: 2 MS/s on 1090, full gain */
-                rtlsdr_set_sample_rate(d, ADSB_FS);
-                rtlsdr_set_center_freq(d, 1090000000);
-                rtlsdr_set_tuner_gain(d, ngains ? gains[ngains - 1] : 496);
+                rad_rate(ADSB_FS);
+                rad_freq(1090000000);
+                rad_gain(ngains ? gains[ngains - 1] : 496);
                 g_gain_applied = -1;
             } else {
                 lo_used = g_lo_next = g_station - OFF_MID;
                 cur_off = OFF_MID;
-                rtlsdr_set_sample_rate(d, FS_IN);
-                rtlsdr_set_center_freq(d, (uint32_t)(lo_used + 0.5));
+                rad_rate(FS_IN);
+                rad_freq((uint32_t)(lo_used + 0.5));
                 g_gain_applied = ngains ? gains[g_gain_idx] : gain_for(g_mode, g_station);
-                rtlsdr_set_tuner_gain(d, g_gain_applied);
+                rad_gain(g_gain_applied);
             }
-            rtlsdr_reset_buffer(d);
             g_retune_pending = 0; g_switch_at = 0; fade = 0; fade_target = 1;
             raw_r = raw_w;
             g_adsb = g_adsb_want;
-            rtlsdr_read_async(d, CALLBACK_cb, NULL, USB_BUFS, USB_LEN);
-            if (g_stop || !g_adsb_switch) break;               /* stopped, or the dongle went away */
+            if (rsp) rsp_stream();
+            else { rtlsdr_reset_buffer(d); rtlsdr_read_async(d, CALLBACK_cb, NULL, USB_BUFS, USB_LEN); }
+            if (g_stop || !g_adsb_switch || (rsp && rsp_removed)) break;   /* stopped, or the radio went away */
             g_adsb_switch = 0;                                 /* a mode switch: reconfigure and go on */
         }
         dev = NULL;
-        rtlsdr_close(d);
+        if (rsp) rsp_close(); else rtlsdr_close(d);
+        g_rsp = 0;
         if (!g_stop) { beep(4); say("Radio disconnected. Trying again every 2 seconds."); announced_missing = 1; Sleep(2000); }
     }
     return 0;

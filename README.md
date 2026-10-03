@@ -1,6 +1,6 @@
 # AccessibleSDR
 
-A screen-reader-first radio for RTL-SDR USB dongles (made with the RTL-SDR Blog V4). Everything is spoken through NVDA, and everything works from the keyboard. Receive only: it never transmits.
+A screen-reader-first radio for RTL-SDR USB dongles (made with the RTL-SDR Blog V4) and SDRplay RSP radios. Everything is spoken through NVDA, and everything works from the keyboard. Receive only: it never transmits.
 
 It plays FM (stereo, HD Radio HD1 to HD4, station names), AM, shortwave, aircraft, weather, ham, CB, FRS/GMRS, marine, railroad and more, glides across the dial like an analog radio, and decodes digital signals out loud: P25 (including trunked systems), DMR, NXDN, D-Star and Fusion voice, pagers, weather alerts, aircraft position and messages, ship positions, wireless sensors and FT8.
 
@@ -15,6 +15,13 @@ It plays FM (stereo, HD Radio HD1 to HD4, station names), AM, shortwave, aircraf
 The app updates itself: when it starts, it checks for a newer version, downloads it, and restarts.
 
 There are two downloads on the Releases page: **win-x64** for most PCs, and **win-arm64** for Snapdragon (Windows on ARM) PCs. Volume starts at 30 percent.
+
+## SDRplay radios (RSP1, RSP1A, RSP1B, RSP2, RSPdx, RSPduo)
+
+1. Install the SDRplay API from sdrplay.com (Downloads, "API" for Windows). It's free, and it's SDRplay's own driver.
+2. Plug in the RSP and run `tuner.exe`. It says "SDRplay radio connected".
+
+If both an RTL-SDR and an SDRplay radio are plugged in, the RTL-SDR is used. On an RSP1A or RSP1B, the broadcast AM and FM notch filter switches on automatically whenever you're tuned outside those bands, which keeps strong local stations from overloading the radio. On a Snapdragon (ARM) PC, if SDRplay doesn't offer an ARM version of the API, use the win-x64 download of this app; Windows runs it fine.
 
 ## Keys
 

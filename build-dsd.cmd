@@ -5,7 +5,10 @@ setlocal
 call "%~dp0env.cmd" || exit /b 1
 call "%VCVARS%" >nul || exit /b 1
 set PKG_CONFIG_EXECUTABLE=
-set COMMONCM=-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON
+rem target processor stated explicitly: when cross-building, CMake would otherwise assume the
+rem host's and dsd-neo would pick ARM NEON code for an x64 build
+set COMMONCM=-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON ^
+  -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=%CMPROC%
 
 rem ---- mbelib-neo (AMBE/IMBE vocoders) ----
 cmake -S "%ROOT%\src\mbelib-neo" -B "%BLD%\mbelib-neo" %COMMONCM% ^

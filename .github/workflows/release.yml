@@ -50,7 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "AccessibleSDR $GITHUB_REF_NAME. Download the zip for your PC: win-x64 for most PCs, win-arm64 for Snapdragon PCs."
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "AccessibleSDR $GITHUB_REF_NAME. Download the zip for your PC: win-x64 for most PCs, win-arm64 for Snapdragon PCs. Unzip anywhere and run tuner.exe. Copies already installed update themselves."
           gh release upload "$GITHUB_REF_NAME" release/*.zip --clobber
 
       - name: Keep the zip as a build artifact

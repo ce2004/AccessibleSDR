@@ -360,6 +360,10 @@ static volatile int g_dir, g_fine, g_at_edge;
 static volatile LONG g_edge_ticks;          /* band edges crossed while gliding (UI ticks for each) */
 static volatile LONGLONG g_hold_start;
 static volatile float g_volume = 0.30f;
+/* Preferences (Ctrl+P), saved in prefs.txt */
+static volatile int g_pref_hq = 1;           /* high quality digital voice (44.1 kHz chain) */
+static volatile int g_pref_announce = 1;     /* speak each call once (talkgroup, radio) */
+static volatile int g_pref_sounds = 1;       /* the chimes */
 static volatile LONG g_stop;
 static double g_qpf;
 static HWND g_wnd;
@@ -561,7 +565,11 @@ static DWORD WINAPI sfx_thread(LPVOID p)
     free(pcm);
     return 0;
 }
-static void beep(int kind) { CloseHandle(CreateThread(NULL, 0, sfx_thread, (LPVOID)(INT_PTR)kind, 0, NULL)); }
+static void beep(int kind)
+{
+    if (!g_pref_sounds) return;                         /* Sounds off (Preferences) */
+    CloseHandle(CreateThread(NULL, 0, sfx_thread, (LPVOID)(INT_PTR)kind, 0, NULL));
+}
 
 /* ---------- audio out (wide FM, HD, narrow modes each get a device) ---------- */
 typedef struct {
@@ -1601,7 +1609,10 @@ static void say(const char *text);
 static void beep(int kind);
 static CRITICAL_SECTION dec_lock;
 
-static void dec_add(const char *text)
+static void dec_add_speak(const char *text, int speak);
+static void dec_add(const char *text) { dec_add_speak(text, 1); }
+
+static void dec_add_speak(const char *text, int speak)
 {
     EnterCriticalSection(&dec_lock);
     snprintf(dec_hist[dec_count % DEC_HIST], 400, "%s", text);
@@ -1615,7 +1626,7 @@ static void dec_add(const char *text)
                 t.wSecond, g_station / 1e6, text);
         fclose(fp);
     }
-    if (g_decode_speak) { beep(6); say(text); }
+    if (g_decode_speak && speak) { beep(6); say(text); }
 }
 
 static const char *same_event(const char *c)
@@ -1875,7 +1886,6 @@ static float bq_run(biquad_t *f, float x)
 #define VTAPS 16                                        /* taps per phase */
 #define VLOOK 40                                        /* 5 ms look-ahead at 8 kHz */
 
-static volatile int g_pref_hq = 1, g_pref_every_call;   /* Preferences (Ctrl+P), saved in prefs.txt */
 static biquad_t v_hp, v_shelf, v_pres, v_bhp, v_blp, v_xhp1, v_xhp2, v_xlp;
 static float v_poly[VL][VTAPS], v_hist[VTAPS], v_look[VLOOK];
 static float v_lvl, v_gain = 2.f, v_peak;
@@ -1945,6 +1955,80 @@ static int voice_chain(float x, float *out)
     return n;
 }
 
+/* Recording (Preferences): every call goes into one WAV in the Recordings folder beside
+   presets.txt. Only call audio is written, so the gaps between calls are left out. The rate is
+   fixed when recording starts: 44.1 kHz with high quality voice on, the decoder's 8 kHz off.
+   The header is brought up to date every few seconds, so the file stays playable if the app
+   is closed suddenly. */
+static CRITICAL_SECTION rec_lock;
+static FILE *rec_fp;
+static int rec_rate;
+static DWORD rec_bytes, rec_header_t;
+static char rec_name[MAX_PATH];
+
+static void rec_header(void)
+{
+    DWORD riff = 36 + rec_bytes, fmt = 16, rate = rec_rate, bps = rec_rate * 2, data = rec_bytes;
+    WORD pcm = 1, ch = 1, align = 2, bits = 16;
+    long here = ftell(rec_fp);
+    fseek(rec_fp, 0, SEEK_SET);
+    fwrite("RIFF", 1, 4, rec_fp); fwrite(&riff, 4, 1, rec_fp); fwrite("WAVEfmt ", 1, 8, rec_fp);
+    fwrite(&fmt, 4, 1, rec_fp); fwrite(&pcm, 2, 1, rec_fp); fwrite(&ch, 2, 1, rec_fp);
+    fwrite(&rate, 4, 1, rec_fp); fwrite(&bps, 4, 1, rec_fp); fwrite(&align, 2, 1, rec_fp); fwrite(&bits, 2, 1, rec_fp);
+    fwrite("data", 1, 4, rec_fp); fwrite(&data, 4, 1, rec_fp);
+    fseek(rec_fp, here > 44 ? here : 44, SEEK_SET);
+    fflush(rec_fp);
+}
+
+/* returns 1 if recording started; said gets what to speak */
+static int rec_start(char *said, size_t n)
+{
+    char dir[MAX_PATH]; snprintf(dir, sizeof dir, "%s", saved_path);
+    strcpy(strrchr(dir, '\\') + 1, "Recordings");
+    CreateDirectoryA(dir, NULL);
+    SYSTEMTIME t; GetLocalTime(&t);
+    EnterCriticalSection(&rec_lock);
+    if (!rec_fp) {
+        snprintf(rec_name, sizeof rec_name, "%s\\Calls %04d-%02d-%02d %02d-%02d-%02d.wav", dir,
+                 t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+        rec_fp = fopen(rec_name, "wb");
+        rec_rate = g_pref_hq ? VOICE_RATE : 8000;
+        rec_bytes = 0; rec_header_t = GetTickCount();
+        if (rec_fp) rec_header();
+    }
+    int ok = rec_fp != NULL;
+    LeaveCriticalSection(&rec_lock);
+    if (ok) snprintf(said, n, "Recording calls at %s", rec_rate == 8000 ? "8 kilohertz" : "44.1 kilohertz");
+    else snprintf(said, n, "Could not create the recording file");
+    return ok;
+}
+
+static void rec_stop(char *said, size_t n)
+{
+    EnterCriticalSection(&rec_lock);
+    DWORD secs = 0;
+    if (rec_fp) {
+        rec_header(); fclose(rec_fp); rec_fp = NULL;
+        secs = rec_bytes / 2 / rec_rate;
+        if (!rec_bytes) DeleteFileA(rec_name);            /* no calls came in: no empty file */
+    }
+    LeaveCriticalSection(&rec_lock);
+    if (!said) return;
+    if (!secs && !rec_bytes) snprintf(said, n, "Recording stopped. No calls were recorded.");
+    else snprintf(said, n, "Recording stopped, %lu minutes %lu seconds of calls saved in Recordings", secs / 60, secs % 60);
+}
+
+static void rec_write(const short *s, int count)
+{
+    if (!rec_fp) return;                                  /* (checked again under the lock) */
+    EnterCriticalSection(&rec_lock);
+    if (rec_fp) {
+        rec_bytes += (DWORD)fwrite(s, 2, count, rec_fp) * 2;
+        if (GetTickCount() - rec_header_t > 5000) { rec_header(); rec_header_t = GetTickCount(); }
+    }
+    LeaveCriticalSection(&rec_lock);
+}
+
 static DWORD WINAPI voice_thread(LPVOID p)
 {
     (void)p;
@@ -1971,6 +2055,11 @@ static DWORD WINAPI voice_thread(LPVOID p)
             float y[8];
             int ny = voice_chain(x * fade, y);
             for (int k = 0; k < ny; k++) { short s = clip16(y[k] * v); out_frame(&voi, s, s); }
+            if (have && rec_fp) {                          /* calls only: gaps between them are skipped */
+                short r[8];
+                if (rec_rate == 8000) { r[0] = clip16(x * 32768.f * 1.6f); rec_write(r, 1); }
+                else { for (int k = 0; k < ny; k++) r[k] = clip16(y[k] * 32767.f); rec_write(r, ny); }
+            }
         }
         next += step;
         LONGLONG wait = next - now();
@@ -1992,16 +2081,12 @@ static DWORD WINAPI ds_voice_reader(LPVOID p)
         if (!ReadFile(h, buf, sizeof buf, &got, NULL) || !got) break;
         /* voice is starting: announce who it is, once per call (control channels mention
            talkgroups constantly, so only real voice triggers an announcement) */
-        /* "Announce every call" (Preferences): every transmission after 1.5 s of quiet, even the
-           same group again; otherwise once per call, and not the same one again within 20 s */
-        static LONGLONG last_voice;
-        int fresh = g_pref_every_call ? now() - last_voice > (LONGLONG)(1.5 * g_qpf)
-                                      : now() > g_voice_until && (strcmp(ds_call, ds_said) || GetTickCount() - ds_said_t > 20000);
-        last_voice = now();
-        if (fresh && ds_call[0]) {
+        /* once per call, never the same one again within 20 s. "Announce calls" off (Preferences)
+           still logs it for R, silently. */
+        if (now() > g_voice_until && ds_call[0] && (strcmp(ds_call, ds_said) || GetTickCount() - ds_said_t > 20000)) {
             snprintf(ds_said, sizeof ds_said, "%s", ds_call);
             ds_said_t = GetTickCount();
-            dec_add(ds_said);
+            dec_add_speak(ds_said, g_pref_announce);
         }
         voice_push(buf, got / 2);
         if (g_listen_secs) {                                /* test runs keep the decoded voice, and its timing */
@@ -3886,11 +3971,13 @@ static void out_path(wchar_t *p, size_t n)
 
 /* ---------- Ctrl+P: Preferences, a spoken list (prefs.txt beside presets.txt) ---------- */
 static int g_prefs, g_pref_idx;
-static volatile int *const pref_vals[] = { &g_pref_hq, &g_pref_every_call };
-static const char *const pref_keys[] = { "hq_digital_voice", "announce_every_call" };
+static volatile int *const pref_vals[] = { &g_pref_hq, &g_pref_announce, &g_pref_sounds };
+static const char *const pref_keys[] = { "hq_digital_voice", "announce_calls", "sounds" };
 static const char *const pref_names[] = { "High quality digital voice: 44.1 kilohertz, fuller low end, rebuilt highs, even loudness",
-                                          "Announce every call on digital systems" };
-#define NPREFS 2
+                                          "Announce calls on digital systems",
+                                          "Sounds" };
+#define NPREFS 3                                         /* settings; the next item is recording */
+#define NPREF_ITEMS (NPREFS + 1)
 
 static void prefs_path(char *p, size_t n)
 {
@@ -3920,7 +4007,9 @@ static void prefs_save(void)
 static void prefs_say(void)
 {
     char t[300];
-    snprintf(t, sizeof t, "%s, %s, %d of %d", pref_names[g_pref_idx], *pref_vals[g_pref_idx] ? "on" : "off", g_pref_idx + 1, NPREFS);
+    if (g_pref_idx < NPREFS)
+        snprintf(t, sizeof t, "%s, %s, %d of %d", pref_names[g_pref_idx], *pref_vals[g_pref_idx] ? "on" : "off", g_pref_idx + 1, NPREF_ITEMS);
+    else snprintf(t, sizeof t, "%s, %d of %d", rec_fp ? "Stop recording" : "Start recording", g_pref_idx + 1, NPREF_ITEMS);
     say(t);
 }
 
@@ -3934,9 +4023,15 @@ static void prefs_open(void)
 static void prefs_key(WPARAM wp)
 {
     if (wp == VK_UP) { if (g_pref_idx > 0) g_pref_idx--; else beep(0); prefs_say(); }
-    else if (wp == VK_DOWN) { if (g_pref_idx < NPREFS - 1) g_pref_idx++; else beep(0); prefs_say(); }
+    else if (wp == VK_DOWN) { if (g_pref_idx < NPREF_ITEMS - 1) g_pref_idx++; else beep(0); prefs_say(); }
     else if (wp == VK_HOME) { g_pref_idx = 0; prefs_say(); }
-    else if (wp == VK_END) { g_pref_idx = NPREFS - 1; prefs_say(); }
+    else if (wp == VK_END) { g_pref_idx = NPREF_ITEMS - 1; prefs_say(); }
+    else if ((wp == VK_SPACE || wp == VK_RETURN) && g_pref_idx == NPREFS) {
+        char t[200];
+        if (rec_fp) rec_stop(t, sizeof t);
+        else if (rec_start(t, sizeof t)) beep(5);
+        say(t);
+    }
     else if (wp == VK_SPACE || wp == VK_RETURN) {
         *pref_vals[g_pref_idx] = !*pref_vals[g_pref_idx];
         prefs_save();
@@ -4566,7 +4661,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     load_presets();
     load_lockouts();
     out_load();                                     /* the output device chosen with O, if still present */
+    InitializeCriticalSection(&rec_lock);
     prefs_load();
+    if (GetEnvironmentVariableA("SDR_TEST_RECORD", NULL, 0)) { char t[200]; rec_start(t, sizeof t); }   /* testing */
     CreateThread(NULL, 0, location_thread, (LPVOID)saved_path, 0, NULL);
     int test_run = cmd && !strncmp(cmd, "--", 2);
     if (!test_run) CreateThread(NULL, 0, update_thread, NULL, 0, NULL);
@@ -4748,6 +4845,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     while (GetMessageW(&m, NULL, 0, 0) > 0) { TranslateMessage(&m); DispatchMessageW(&m); }
 
     InterlockedExchange(&g_stop, 1);
+    rec_stop(NULL, 0);                              /* finish the recording's header */
     SetEvent(hd_event);
     WaitForSingleObject(radio, 3000);
     mm_stop();

@@ -28,3 +28,4 @@ talkgroups.csv
 *.wav
 __pycache__/
 prefs.txt
+Recordings/

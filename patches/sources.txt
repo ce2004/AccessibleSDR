@@ -1,0 +1,12 @@
+# name|upstream|commit  (fetch-sources.cmd clones these, then applies <name>.patch if present)
+AIS-catcher|https://github.com/jvde-github/AIS-catcher.git|b6b4ae25c566bd74f2ede9c385b5e899f364ced2
+acarsdec|https://github.com/f00b4r0/acarsdec.git|225152e86537861b8f37dbcc31274e3c4cad5213
+cJSON|https://github.com/DaveGamble/cJSON.git|6d9f2443ab071f86e5d9b43025a40929ec41c46c
+dsd-neo|https://github.com/arancormonk/dsd-neo|fb049e96a078f06c50e02fb9ea59c95e6996438d
+ft8_lib|https://github.com/kgoba/ft8_lib.git|9fec6ca39886edbf96f4f5e71edc76da5074e871
+libusb|https://github.com/libusb/libusb.git|15a7ebb4d426c5ce196684347d2b7cafad862626
+mbelib-neo|https://github.com/arancormonk/mbelib-neo|d7758ad88c64aba5d26206dab26d28f96ea41f6c
+multimon-ng|https://github.com/EliasOenal/multimon-ng.git|0722194b7739748e49f18ac1fc76f236d4ca390d
+nrsc5|https://github.com/theori-io/nrsc5.git|9beb2c77171472c707f285f51a1385ac4c4a8be6
+rtl-sdr-blog|https://github.com/rtlsdrblog/rtl-sdr-blog.git|aed0ea19f3a273370a13c9009b96313c75d54c7b
+rtl_433|https://github.com/merbanan/rtl_433.git|ca5a4fd31f71149a6380300a6e8b02a680eb9bfa

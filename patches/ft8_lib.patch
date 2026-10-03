@@ -1,0 +1,22 @@
+diff --git a/ft8/message.c b/ft8/message.c
+index 5975636..8dd3353 100644
+--- a/ft8/message.c
++++ b/ft8/message.c
+@@ -3,6 +3,17 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#if defined(_WIN32) && !defined(HAVE_STPCPY)
++// SDR local change: the Windows CRT has no stpcpy
++static char* sdr_stpcpy(char* dst, const char* src)
++{
++    size_t n = strlen(src);
++    memcpy(dst, src, n + 1);
++    return dst + n;
++}
++#define stpcpy sdr_stpcpy
++#endif
++
+ #define LOG_LEVEL LOG_WARN
+ #include "debug.h"
+ 

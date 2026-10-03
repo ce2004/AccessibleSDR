@@ -1,0 +1,4 @@
+# batch files need CRLF; patches must keep exactly what git diff produced
+*.cmd     text eol=crlf
+*.patch   -text
+*.dll     binary

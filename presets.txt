@@ -1,0 +1,337 @@
+# Universal channels only: nothing here is tied to one city.
+# Local stations and systems are found with Explore (X) and land in Found here.
+
+[FM radio | 87.5 | 108 | WFM]
+
+[AM radio | 0.53 | 1.71 | AM]
+
+[Weather | 162.4 | 162.55 | NFM]
+NOAA weather channel 1 | 162.55 | NFM
+NOAA weather channel 2 | 162.4 | NFM
+NOAA weather channel 3 | 162.475 | NFM
+NOAA weather channel 4 | 162.425 | NFM
+NOAA weather channel 5 | 162.45 | NFM
+NOAA weather channel 6 | 162.5 | NFM
+NOAA weather channel 7 | 162.525 | NFM
+
+[Aircraft | 118 | 137 | AM]
+Guard, emergency | 121.5 | AM
+Air to air | 122.75 | AM
+Air to air | 123.45 | AM
+Unicom | 122.7 | AM
+Unicom | 122.725 | AM
+Unicom | 122.8 | AM
+Multicom | 122.9 | AM
+Unicom | 122.975 | AM
+Unicom | 123.0 | AM
+Unicom | 123.05 | AM
+Unicom | 123.075 | AM
+Flight service | 122.2 | AM
+ACARS data | 129.125 | AM
+ACARS data | 130.025 | AM
+ACARS data | 130.45 | AM
+ACARS data | 131.125 | AM
+ACARS data | 131.55 | AM
+VDL2 data | 136.65 | AM
+VDL2 data | 136.975 | AM
+
+[Military aircraft | 225 | 400 | AM]
+Military guard, emergency | 243.0 | AM
+Search and rescue | 282.8 | AM
+
+[Shortwave broadcast | 2.3 | 26.1 | AM]
+120 meter band | 2.3 | AM
+90 meter band | 3.2 | AM
+75 meter band | 3.9 | AM
+60 meter band | 4.75 | AM
+49 meter band | 5.9 | AM
+41 meter band | 7.2 | AM
+31 meter band | 9.4 | AM
+25 meter band | 11.6 | AM
+22 meter band | 13.57 | AM
+19 meter band | 15.1 | AM
+16 meter band | 17.48 | AM
+15 meter band | 18.9 | AM
+13 meter band | 21.45 | AM
+11 meter band | 25.67 | AM
+
+[Time and odd signals | 2.4 | 25.1 | AM]
+WWV 2.5 | 2.5 | AM
+CHU Canada 3330 | 3.33 | USB
+The Buzzer, Russia | 4.625 | USB
+WWV 5 | 5.0 | AM
+CHU Canada 7850 | 7.85 | USB
+Air Force HF, 8992 | 8.992 | USB
+WWV 10 | 10.0 | AM
+Air Force HF, 11175 | 11.175 | USB
+CHU Canada 14670 | 14.67 | USB
+WWV 15 | 15.0 | AM
+WWV 20 | 20.0 | AM
+WWV 25 | 25.0 | AM
+
+[Ham HF | 1.8 | 29.7 | LSB]
+160 meters | 1.9 | LSB
+FT8 160 meters | 1.84 | USB
+80 meters | 3.85 | LSB
+FT8 80 meters | 3.573 | USB
+40 meters | 7.2 | LSB
+FT8 40 meters | 7.074 | USB
+CW 40 meters | 7.03 | CW
+FT8 30 meters | 10.136 | USB
+WSPR 30 meters | 10.1387 | USB
+20 meters | 14.2 | USB
+FT8 20 meters | 14.074 | USB
+CW 20 meters | 14.03 | CW
+WSPR 20 meters | 14.0956 | USB
+17 meters | 18.13 | USB
+FT8 17 meters | 18.1 | USB
+15 meters | 21.3 | USB
+FT8 15 meters | 21.074 | USB
+12 meters | 24.95 | USB
+FT8 12 meters | 24.915 | USB
+10 meters | 28.4 | USB
+FT8 10 meters | 28.074 | USB
+
+[Ham VHF and UHF | 50 | 450 | NFM]
+6 meter calling | 50.125 | USB
+FT8 6 meters | 50.313 | USB
+FT8 2 meters | 144.174 | USB
+APRS data | 144.39 | NFM
+Space station voice | 145.8 | NFM
+Space station packet | 145.825 | NFM
+2 meter calling | 146.52 | NFM
+1.25 meter calling | 223.5 | NFM
+70 centimeter calling | 446.0 | NFM
+
+[Satellites | 137 | 440 | NFM]
+Weather satellite band, 137.1 | 137.1 | NFM
+Weather satellite band, 137.9 | 137.9 | NFM
+Space station voice | 145.8 | NFM
+Space station packet | 145.825 | NFM
+SO-50 amateur satellite | 436.795 | NFM
+
+[CB radio | 26.965 | 27.405 | AM]
+CB channel 1 | 26.965 | AM
+CB channel 2 | 26.975 | AM
+CB channel 3 | 26.985 | AM
+CB channel 4 | 27.005 | AM
+CB channel 5 | 27.015 | AM
+CB channel 6 | 27.025 | AM
+CB channel 7 | 27.035 | AM
+CB channel 8 | 27.055 | AM
+CB channel 9, emergency | 27.065 | AM
+CB channel 10 | 27.075 | AM
+CB channel 11 | 27.085 | AM
+CB channel 12 | 27.105 | AM
+CB channel 13 | 27.115 | AM
+CB channel 14 | 27.125 | AM
+CB channel 15 | 27.135 | AM
+CB channel 16 | 27.155 | AM
+CB channel 17 | 27.165 | AM
+CB channel 18 | 27.175 | AM
+CB channel 19, truckers | 27.185 | AM
+CB channel 20 | 27.205 | AM
+CB channel 21 | 27.215 | AM
+CB channel 22 | 27.225 | AM
+CB channel 23 | 27.255 | AM
+CB channel 24 | 27.235 | AM
+CB channel 25 | 27.245 | AM
+CB channel 26 | 27.265 | AM
+CB channel 27 | 27.275 | AM
+CB channel 28 | 27.285 | AM
+CB channel 29 | 27.295 | AM
+CB channel 30 | 27.305 | AM
+CB channel 31 | 27.315 | AM
+CB channel 32 | 27.325 | AM
+CB channel 33 | 27.335 | AM
+CB channel 34 | 27.345 | AM
+CB channel 35 | 27.355 | AM
+CB channel 36 | 27.365 | AM
+CB channel 37 | 27.375 | AM
+CB channel 38 | 27.385 | AM
+CB channel 39 | 27.395 | AM
+CB channel 40 | 27.405 | AM
+
+[FRS and GMRS | 462.55 | 467.725 | NFM]
+FRS channel 1 | 462.5625 | NFM
+FRS channel 2 | 462.5875 | NFM
+FRS channel 3 | 462.6125 | NFM
+FRS channel 4 | 462.6375 | NFM
+FRS channel 5 | 462.6625 | NFM
+FRS channel 6 | 462.6875 | NFM
+FRS channel 7 | 462.7125 | NFM
+FRS channel 8 | 467.5625 | NFM
+FRS channel 9 | 467.5875 | NFM
+FRS channel 10 | 467.6125 | NFM
+FRS channel 11 | 467.6375 | NFM
+FRS channel 12 | 467.6625 | NFM
+FRS channel 13 | 467.6875 | NFM
+FRS channel 14 | 467.7125 | NFM
+FRS channel 15 | 462.55 | NFM
+FRS channel 16 | 462.575 | NFM
+FRS channel 17 | 462.6 | NFM
+FRS channel 18 | 462.625 | NFM
+FRS channel 19 | 462.65 | NFM
+FRS channel 20 | 462.675 | NFM
+FRS channel 21 | 462.7 | NFM
+FRS channel 22 | 462.725 | NFM
+
+[MURS | 151.82 | 154.6 | NFM]
+MURS channel 1 | 151.82 | NFM
+MURS channel 2 | 151.88 | NFM
+MURS channel 3 | 151.94 | NFM
+MURS blue dot | 154.57 | NFM
+MURS green dot | 154.6 | NFM
+
+[Marine | 156 | 162.025 | NFM]
+Marine channel 6, safety | 156.3 | NFM
+Marine channel 9, calling | 156.45 | NFM
+Marine channel 13, bridge to bridge | 156.65 | NFM
+Marine channel 16, distress | 156.8 | NFM
+Marine channel 22A, Coast Guard | 157.1 | NFM
+Marine channel 70, digital calling | 156.525 | NFM
+AIS ship data | 161.975 | NFM
+AIS ship data | 162.025 | NFM
+
+[Railroad | 160.215 | 161.565 | NFM]
+Railroad channel 7 | 160.215 | NFM
+Railroad channel 8 | 160.23 | NFM
+Railroad channel 9 | 160.245 | NFM
+Railroad channel 10 | 160.26 | NFM
+Railroad channel 11 | 160.275 | NFM
+Railroad channel 12 | 160.29 | NFM
+Railroad channel 13 | 160.305 | NFM
+Railroad channel 14 | 160.32 | NFM
+Railroad channel 15 | 160.335 | NFM
+Railroad channel 16 | 160.35 | NFM
+Railroad channel 17 | 160.365 | NFM
+Railroad channel 18 | 160.38 | NFM
+Railroad channel 19 | 160.395 | NFM
+Railroad channel 20 | 160.41 | NFM
+Railroad channel 21 | 160.425 | NFM
+Railroad channel 22 | 160.44 | NFM
+Railroad channel 23 | 160.455 | NFM
+Railroad channel 24 | 160.47 | NFM
+Railroad channel 25 | 160.485 | NFM
+Railroad channel 26 | 160.5 | NFM
+Railroad channel 27 | 160.515 | NFM
+Railroad channel 28 | 160.53 | NFM
+Railroad channel 29 | 160.545 | NFM
+Railroad channel 30 | 160.56 | NFM
+Railroad channel 31 | 160.575 | NFM
+Railroad channel 32 | 160.59 | NFM
+Railroad channel 33 | 160.605 | NFM
+Railroad channel 34 | 160.62 | NFM
+Railroad channel 35 | 160.635 | NFM
+Railroad channel 36 | 160.65 | NFM
+Railroad channel 37 | 160.665 | NFM
+Railroad channel 38 | 160.68 | NFM
+Railroad channel 39 | 160.695 | NFM
+Railroad channel 40 | 160.71 | NFM
+Railroad channel 41 | 160.725 | NFM
+Railroad channel 42 | 160.74 | NFM
+Railroad channel 43 | 160.755 | NFM
+Railroad channel 44 | 160.77 | NFM
+Railroad channel 45 | 160.785 | NFM
+Railroad channel 46 | 160.8 | NFM
+Railroad channel 47 | 160.815 | NFM
+Railroad channel 48 | 160.83 | NFM
+Railroad channel 49 | 160.845 | NFM
+Railroad channel 50 | 160.86 | NFM
+Railroad channel 51 | 160.875 | NFM
+Railroad channel 52 | 160.89 | NFM
+Railroad channel 53 | 160.905 | NFM
+Railroad channel 54 | 160.92 | NFM
+Railroad channel 55 | 160.935 | NFM
+Railroad channel 56 | 160.95 | NFM
+Railroad channel 57 | 160.965 | NFM
+Railroad channel 58 | 160.98 | NFM
+Railroad channel 59 | 160.995 | NFM
+Railroad channel 60 | 161.01 | NFM
+Railroad channel 61 | 161.025 | NFM
+Railroad channel 62 | 161.04 | NFM
+Railroad channel 63 | 161.055 | NFM
+Railroad channel 64 | 161.07 | NFM
+Railroad channel 65 | 161.085 | NFM
+Railroad channel 66 | 161.1 | NFM
+Railroad channel 67 | 161.115 | NFM
+Railroad channel 68 | 161.13 | NFM
+Railroad channel 69 | 161.145 | NFM
+Railroad channel 70 | 161.16 | NFM
+Railroad channel 71 | 161.175 | NFM
+Railroad channel 72 | 161.19 | NFM
+Railroad channel 73 | 161.205 | NFM
+Railroad channel 74 | 161.22 | NFM
+Railroad channel 75 | 161.235 | NFM
+Railroad channel 76 | 161.25 | NFM
+Railroad channel 77 | 161.265 | NFM
+Railroad channel 78 | 161.28 | NFM
+Railroad channel 79 | 161.295 | NFM
+Railroad channel 80 | 161.31 | NFM
+Railroad channel 81 | 161.325 | NFM
+Railroad channel 82 | 161.34 | NFM
+Railroad channel 83 | 161.355 | NFM
+Railroad channel 84 | 161.37 | NFM
+Railroad channel 85 | 161.385 | NFM
+Railroad channel 86 | 161.4 | NFM
+Railroad channel 87 | 161.415 | NFM
+Railroad channel 88 | 161.43 | NFM
+Railroad channel 89 | 161.445 | NFM
+Railroad channel 90 | 161.46 | NFM
+Railroad channel 91 | 161.475 | NFM
+Railroad channel 92 | 161.49 | NFM
+Railroad channel 93 | 161.505 | NFM
+Railroad channel 94 | 161.52 | NFM
+Railroad channel 95 | 161.535 | NFM
+Railroad channel 96 | 161.55 | NFM
+Railroad channel 97 | 161.565 | NFM
+
+[Public safety, national | 150 | 860 | NFM]
+Interop VTAC 11 | 151.1375 | NFM
+Fire mutual aid | 154.265 | NFM
+Fire mutual aid | 154.28 | NFM
+Fire mutual aid | 154.295 | NFM
+Interop VTAC 12 | 154.4525 | NFM
+Hospital emergency, HEAR | 155.34 | NFM
+Interop VCALL 10 | 155.7525 | NFM
+Interop VTAC 13 | 158.7375 | NFM
+Interop VTAC 14 | 159.4725 | NFM
+Interop UCALL 40 | 453.2125 | NFM
+Interop UTAC 41 | 453.4625 | NFM
+Interop UTAC 42 | 453.7125 | NFM
+Interop UTAC 43 | 453.8625 | NFM
+Interop 8CALL 90 | 851.0125 | NFM
+Interop 8TAC 91 | 851.5125 | NFM
+Interop 8TAC 92 | 852.0125 | NFM
+Interop 8TAC 93 | 852.5125 | NFM
+Interop 8TAC 94 | 853.0125 | NFM
+EMS med channel 1 | 463.0 | NFM
+EMS med channel 2 | 463.025 | NFM
+EMS med channel 3 | 463.05 | NFM
+EMS med channel 4 | 463.075 | NFM
+EMS med channel 5 | 463.1 | NFM
+EMS med channel 6 | 463.125 | NFM
+EMS med channel 7 | 463.15 | NFM
+EMS med channel 8 | 463.175 | NFM
+
+[Digital sounds | 300 | 1700 | NFM]
+Car key fobs and tire sensors, 315 | 315.0 | NFM
+Wireless sensors, 433.92 | 433.92 | NFM
+Wireless sensors and meters, 915 | 915.0 | NFM
+Pager band, 929 | 929.5 | NFM
+Pager band, 931 | 931.5 | NFM
+Small aircraft, UAT 978 | 978.0 | NFM
+Aircraft transponders, 1090 | 1090.0 | NFM
+Inmarsat satellites | 1545.0 | NFM
+GPS L1 | 1575.42 | NFM
+Iridium satellites | 1626.0 | NFM
+
+[Tune anywhere | 0.5 | 1766 | NFM]
+Low end | 1.0 | AM
+VHF low | 40.0 | NFM
+VHF high | 150.0 | NFM
+UHF | 450.0 | NFM
+700 megahertz | 770.0 | NFM
+800 megahertz | 855.0 | NFM
+900 megahertz | 915.0 | NFM
+L band | 1500.0 | NFM

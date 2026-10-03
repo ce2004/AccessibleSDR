@@ -1,0 +1,27 @@
+# downloaded or built (fetch-sources.cmd / build-all.cmd recreate them)
+/vcpkg/
+/llvm-mingw/
+/build/
+/build-x64/
+/bin/
+/bin-x64/
+/release/
+/src/*/
+!/src/tools/
+!/src/aoshim/
+
+# personal data the app writes next to itself
+saved.txt
+found.txt
+lockouts.txt
+location.txt
+decodes.txt
+capplus_*.csv
+dsd_groups.csv
+talkgroups.csv
+*.log
+*.raw
+*.cu8
+*.iq
+*.wav
+__pycache__/

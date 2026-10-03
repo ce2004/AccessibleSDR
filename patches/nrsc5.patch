@@ -1,0 +1,121 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e8af56a..ee85ee7 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -29,20 +29,8 @@ endif()
+ 
+ message (STATUS "Building for ${HOST_TRIPLE}")
+ 
+-find_program (AUTOCONF autoconf)
+-if (NOT AUTOCONF)
+-    message (FATAL_ERROR "Missing autoconf. Install autoconf package and try again.")
+-endif ()
+-
+-find_program (AUTOMAKE automake)
+-if (NOT AUTOMAKE)
+-    message (FATAL_ERROR "Missing automake. Install autoconf package and try again.")
+-endif ()
+-
+-find_program (LIBTOOLIZE NAMES libtoolize glibtoolize)
+-if (NOT LIBTOOLIZE)
+-    message (FATAL_ERROR "Missing libtoolize. Install libtool package and try again.")
+-endif ()
++# SDR local change: autotools are only needed when building fftw/libusb/libao from source,
++# which the Windows ARM64 build does not do.
+ 
+ find_program (PATCH patch)
+ if (NOT PATCH)
+diff --git a/src/input.c b/src/input.c
+index 1e96d23..ed6cbe3 100644
+--- a/src/input.c
++++ b/src/input.c
+@@ -89,11 +89,39 @@ static unsigned int decimate_samples(input_t *st, const uint8_t* in, const uint3
+     return avail;
+ }
+ 
++/* SDR local change: quarter-sample-rate offset tuning. When nrsc5_qshift is +1 the tuner sits
++   fs/4 above the station and samples are rotated up by fs/4 (-1: below / down). Rotating by
++   multiples of j is exact on cu8 data (negation is 255 - x), so no extra noise is added. */
++int nrsc5_qshift;
++static uint32_t qshift_n;
++
++static const uint8_t *qshift_cu8(const uint8_t *buf, uint32_t len)
++{
++    static uint8_t *tmp;
++    static uint32_t cap;
++    if (cap < len) { free(tmp); tmp = malloc(len); cap = len; }
++    for (uint32_t k = 0; k + 1 < len; k += 2)
++    {
++        uint8_t i = buf[k], q = buf[k + 1];
++        switch ((qshift_n++ & 3) * nrsc5_qshift)
++        {
++        case 1: case -3: tmp[k] = 255 - q; tmp[k + 1] = i; break;          /* x j  */
++        case 2: case -2: tmp[k] = 255 - i; tmp[k + 1] = 255 - q; break;    /* x -1 */
++        case 3: case -1: tmp[k] = q; tmp[k + 1] = 255 - i; break;          /* x -j */
++        default: tmp[k] = i; tmp[k + 1] = q; break;
++        }
++    }
++    return tmp;
++}
++
+ void input_push_cu8(input_t *st, const uint8_t *buf, const uint32_t len)
+ {
+     float complex out[FFTCP_FM];
+     uint32_t consumed = 0;
+ 
++    if (nrsc5_qshift)
++        buf = qshift_cu8(buf, len);
++
+     nrsc5_report_iq(st->radio, buf, len);
+ 
+     assert(len % 4 == 0);
+diff --git a/src/main.c b/src/main.c
+index 960697a..4bb87b1 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -722,7 +722,9 @@ static void *input_main(void *arg)
+ #ifdef __MINGW32__
+     HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+     DWORD mode = 0;
+-    GetConsoleMode(hStdin, &mode);
++    // SDR local change: isatty() is also true for NUL; only a real console can be read
++    if (!GetConsoleMode(hStdin, &mode))
++        return NULL;
+     SetConsoleMode(hStdin, mode & (~ENABLE_ECHO_INPUT) & (~ENABLE_LINE_INPUT));
+ #else
+     struct termios prev_termios, t;
+diff --git a/src/nrsc5.c b/src/nrsc5.c
+index b75247b..89ceb08 100644
+--- a/src/nrsc5.c
++++ b/src/nrsc5.c
+@@ -342,6 +342,12 @@ int nrsc5_open(nrsc5_t **result, int device_index)
+     if (err) goto error;
+     err = rtlsdr_set_offset_tuning(st->dev, 1);
+     if (err && err != -2) goto error;
++    {
++        /* SDR local change: narrow the tuner's analog IF filter (default 600 kHz) so strong
++           neighbouring stations are cut before the 8-bit ADC. SDR_TUNER_BW=0 restores auto. */
++        const char *bw = getenv("SDR_TUNER_BW");
++        rtlsdr_set_tuner_bandwidth(st->dev, bw ? (uint32_t)atol(bw) : 600000);
++    }
+ 
+     nrsc5_init(st);
+ 
+@@ -538,8 +544,15 @@ int nrsc5_set_frequency(nrsc5_t *st, float freq)
+     if (!st->stopped)
+         return 1;
+ 
+-    if (st->dev && rtlsdr_set_center_freq(st->dev, freq) != 0)
+-        return 1;
++    {
++        /* SDR local change: SDR_QSHIFT=up|down tunes a quarter sample rate off the station (see input.c) */
++        extern int nrsc5_qshift;
++        const char *q = getenv("SDR_QSHIFT");
++        nrsc5_qshift = q && !strcmp(q, "up") ? 1 : q && !strcmp(q, "down") ? -1 : 0;
++        double tune = freq + nrsc5_qshift * (NRSC5_SAMPLE_RATE_CU8 / 4.0);
++        if (st->dev && rtlsdr_set_center_freq(st->dev, (uint32_t)(tune + 0.5)) != 0)
++            return 1;
++    }
+     if (st->rtltcp && rtltcp_set_center_freq(st->rtltcp, freq) != 0)
+         return 1;
+ 

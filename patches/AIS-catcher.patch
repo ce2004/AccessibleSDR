@@ -1,0 +1,25 @@
+diff --git a/Source/Device/FileRAW.cpp b/Source/Device/FileRAW.cpp
+index ded85ca..1420d59 100644
+--- a/Source/Device/FileRAW.cpp
++++ b/Source/Device/FileRAW.cpp
+@@ -22,6 +22,11 @@
+ #include <sys/stat.h>
+ #include <poll.h>
+ #include <cerrno>
++#else
++// SDR local change: binary stdin on Windows
++#include <io.h>
++#include <fcntl.h>
++#include <cstdio>
+ #endif
+ 
+ #include "FileRAW.h"
+@@ -215,6 +220,8 @@ namespace Device
+ #ifndef _WIN32
+ 			use_raw_stdin = true;
+ #else
++			// SDR local change: stdin is text mode in the Windows CRT (0x1A ends it, CRLF mangled)
++			_setmode(_fileno(stdin), _O_BINARY);
+ 			file = &std::cin;
+ #endif
+ 		}

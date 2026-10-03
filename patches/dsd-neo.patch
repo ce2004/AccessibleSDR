@@ -1,0 +1,172 @@
+diff --git a/src/core/audio/dsd_audio.c b/src/core/audio/dsd_audio.c
+index e9de73d..0ce6793 100644
+--- a/src/core/audio/dsd_audio.c
++++ b/src/core/audio/dsd_audio.c
+@@ -45,6 +45,11 @@
+ #include <string.h>
+ #include <sys/types.h>
+ #include "dsd_audio_internal.h"
++#ifdef _WIN32
++/* SDR local change: _setmode for binary stdin */
++#include <fcntl.h>
++#include <io.h>
++#endif
+ 
+ static int
+ dsd_audio_path_is_wav_container(const char* path) {
+@@ -1052,6 +1057,10 @@ dsd_audio_open_stdin_input(dsd_opts* opts) {
+         return -1;
+     }
+ 
++#ifdef _WIN32
++    /* SDR local change: raw PCM on stdin must not get CRLF/^Z text-mode translation */
++    (void)_setmode(dsd_fileno(stdin), _O_BINARY);
++#endif
+     opts->audio_in_file = sf_open_fd(dsd_fileno(stdin), SFM_READ, opts->audio_in_file_info, 0);
+     if (opts->audio_in_file == NULL) {
+         LOG_ERROR("Error, couldn't open stdin with libsndfile: %s\n", sf_strerror(NULL));
+diff --git a/src/core/audio/dsd_audio2.c b/src/core/audio/dsd_audio2.c
+index 2e391d5..49aa9bf 100644
+--- a/src/core/audio/dsd_audio2.c
++++ b/src/core/audio/dsd_audio2.c
+@@ -177,6 +177,11 @@ dsd_audio_reset_short_lr_working_state(dsd_state* state) {
+     dsd_audio_maybe_reset_output_ring_right(state);
+ }
+ 
++/* SDR local change: --stdout-mono downmixes stereo (L=slot1, R=slot2) stdout audio to one channel.
++ * Identical L/R (FDMA voice duplicated to both sides) passes through unchanged; differing
++ * channels (two TDMA slots) are summed with clipping. Set from runtime/cli/args.c. */
++int dsd_sdr_stdout_mono = 0;
++
+ DSD_AUDIO2_INTERNAL void
+ dsd_output_float_block(dsd_opts* opts, dsd_state* state, const float* samples, size_t frames, int channels) {
+     if (opts->audio_out != 1 || !samples || frames == 0) {
+@@ -187,6 +192,25 @@ dsd_output_float_block(dsd_opts* opts, dsd_state* state, const float* samples, s
+     } else if (opts->audio_out_type == 8) {
+         dsd_udp_audio_hook_blast(opts, state, frames * (size_t)channels * sizeof(float), (void*)samples);
+     } else if (opts->audio_out_type == 1) {
++        if (dsd_sdr_stdout_mono && channels == 2) { /* SDR local change: stereo->mono for stdout */
++            float mono[1024];
++            size_t done = 0;
++            while (done < frames) {
++                size_t n = frames - done;
++                if (n > 1024) {
++                    n = 1024;
++                }
++                for (size_t k = 0; k < n; k++) {
++                    float l = samples[(done + k) * 2];
++                    float r = samples[(done + k) * 2 + 1];
++                    float m = (l == r) ? l : (l + r);
++                    mono[k] = (m > 1.0f) ? 1.0f : ((m < -1.0f) ? -1.0f : m);
++                }
++                write_audio_out(opts->audio_out_fd, mono, n * sizeof(float));
++                done += n;
++            }
++            return;
++        }
+         write_audio_out(opts->audio_out_fd, samples, frames * (size_t)channels * sizeof(float));
+     }
+ }
+@@ -201,6 +225,25 @@ dsd_output_s16_block(dsd_opts* opts, dsd_state* state, const short* samples, siz
+     } else if (opts->audio_out_type == 8) {
+         dsd_udp_audio_hook_blast(opts, state, frames * (size_t)channels * sizeof(short), (void*)samples);
+     } else if (opts->audio_out_type == 1) {
++        if (dsd_sdr_stdout_mono && channels == 2) { /* SDR local change: stereo->mono for stdout */
++            short mono[1024];
++            size_t done = 0;
++            while (done < frames) {
++                size_t n = frames - done;
++                if (n > 1024) {
++                    n = 1024;
++                }
++                for (size_t k = 0; k < n; k++) {
++                    int l = samples[(done + k) * 2];
++                    int r = samples[(done + k) * 2 + 1];
++                    int m = (l == r) ? l : (l + r);
++                    mono[k] = (short)((m > 32767) ? 32767 : ((m < -32768) ? -32768 : m));
++                }
++                write_audio_out(opts->audio_out_fd, mono, n * sizeof(short));
++                done += n;
++            }
++            return;
++        }
+         write_audio_out(opts->audio_out_fd, samples, frames * (size_t)channels * sizeof(short));
+     }
+ }
+diff --git a/src/engine/engine.c b/src/engine/engine.c
+index 3399a11..d855a94 100644
+--- a/src/engine/engine.c
++++ b/src/engine/engine.c
+@@ -3,6 +3,11 @@
+  * Copyright (C) 2026 by arancormonk <180709949+arancormonk@users.noreply.github.com>
+  */
+ 
++#ifdef _WIN32
++/* SDR local change: _setmode for binary stdout */
++#include <fcntl.h>
++#include <io.h>
++#endif
+ #include <dsd-neo/core/audio.h>
+ #include <dsd-neo/core/audio_filters.h>
+ #include <dsd-neo/core/call_state.h>
+@@ -1159,6 +1164,10 @@ dsd_engine_setup_parse_simple_outputs(dsd_opts* opts) {
+     }
+     if (strncmp(opts->audio_out_dev, "-", 1) == 0) {
+         opts->audio_out_fd = dsd_fileno(stdout);
++#ifdef _WIN32
++        /* SDR local change: raw PCM on stdout must not get LF->CRLF translation */
++        (void)_setmode(opts->audio_out_fd, _O_BINARY);
++#endif
+         opts->audio_out_type = 1;
+         LOG_INFO("NOTICE: Audio Out Device: -\n");
+     }
+diff --git a/src/runtime/cli/args.c b/src/runtime/cli/args.c
+index 2a48718..45b34b6 100644
+--- a/src/runtime/cli/args.c
++++ b/src/runtime/cli/args.c
+@@ -4,6 +4,8 @@
+  */
+ 
+ #include <ctype.h>
++/* SDR local change: --stdout-mono flag lives in core/audio/dsd_audio2.c */
++extern int dsd_sdr_stdout_mono;
+ #include <dsd-neo/core/analog_tone.h>
+ #include <dsd-neo/core/channel_mode.h>
+ #include <dsd-neo/core/csv_import.h>
+@@ -1086,6 +1088,11 @@ cli_parse_airspy_option(int argc, char** argv, int i, dsd_opts* opts) {
+             strict_crc_cli = 1;                                                                                        \
+             continue;                                                                                                  \
+         }                                                                                                              \
++        /* SDR local change: mono stdout audio (see dsd_audio2.c) */                                                   \
++        if (strcmp(argv[i], "--stdout-mono") == 0) {                                                                   \
++            dsd_sdr_stdout_mono = 1;                                                                                   \
++            continue;                                                                                                  \
++        }                                                                                                              \
+         if (strcmp(argv[i], "--no-scan-voice-only") == 0) {                                                            \
+             opts->scan_voice_only = 0;                                                                                 \
+             continue;                                                                                                  \
+diff --git a/src/runtime/cli/compact.c b/src/runtime/cli/compact.c
+index 7fb81fa..6391a45 100644
+--- a/src/runtime/cli/compact.c
++++ b/src/runtime/cli/compact.c
+@@ -75,6 +75,7 @@ static const char* const k_skip_exact_no_arg[] = {
+     "--no-decryption-keys",
+     "--dmr-tg-key-clear",
+     "--strict-crc",
++    "--stdout-mono", /* SDR local change */
+     "--no-scan-voice-only",
+     "--dmr-debug-burst",
+     "--dmr-debug-unsynced",
+diff --git a/src/runtime/cli/usage.c b/src/runtime/cli/usage.c
+index 08f8f18..cd3299a 100644
+--- a/src/runtime/cli/usage.c
++++ b/src/runtime/cli/usage.c
+@@ -96,6 +96,8 @@ dsd_cli_usage_section_io(void) {
+     printf("                m17udp for M17 UDP/IP frame output (default host 127.0.0.1; default port 17000)\n");
+     printf("                m17udp:192.168.7.8:17001 for M17 UDP/IP frame output (target address and port)\n");
+     printf("                - for stdout raw decoded audio output\n");
++    /* SDR local change */
++    printf("      --stdout-mono  Downmix stereo (slot1/slot2) stdout audio to one channel\n");
+     printf("  -d <dir>      Create mbe data files, use this directory (TDMA version is experimental)\n");
+     printf("  -r <files>    Read/Play saved mbe data from file(s)\n");
+     printf("  -g <float>    Audio Digital Output Gain  (Default: 0 = Auto;        )\n");

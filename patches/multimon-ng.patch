@@ -1,0 +1,16 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6a935a5..57765aa 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -8,8 +8,9 @@ if( NOT WIN32 )
+ else( NOT WIN32 )
+ 	# Visual Studio C compiler doesn't support C99 (i.e. stdbool.h);
+ 	# so use the Visual Studio C++ compiler instead
+-	project( multimon-ng CXX )
+-	set( PROJECT_LINKER_LANGUAGE CXX )
++	# SDR local change: llvm-mingw is a C99 compiler, so build the C sources as C
++	project( multimon-ng C CXX )
++	set( PROJECT_LINKER_LANGUAGE C )
+ endif( NOT WIN32 )
+ 
+ set( TARGET "${PROJECT_NAME}" )

@@ -1,0 +1,136 @@
+NOTICE: Decoding AUTO: all digital modes with multi-rate SPS hunting
+NOTICE: WAV input sample rate: 48000 Hz (interp=1)
+NOTICE: ------------------------------------------------------------------------------
+NOTICE: | Digital Speech Decoder: DSD-neo v2.10.0 (fb049e9) 
+NOTICE: ------------------------------------------------------------------------------
+NOTICE: MBElib-neo Version: 2.2.0
+NOTICE: Audio Out Device: -
+Audio In/Out Device: -
+WARNING: Input Level LOW -120.0 dBFS: raise source/input volume if signal is present
+10:15:32 Sync: +P25p1 NAC/CC: 293;  HDU
+ HDU  ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:32 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU2  
+ LDU2 ALG ID: 0x80 KEY ID: 0x0000 MI: 0x0000000000000000
+10:15:33 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:34 Sync: +P25p1 NAC/CC: 293;  TDU
+Sync: no sync
+SPS hunt: trying 20 sps (sym=2400, demod=48000)
+10:15:34 Sync: JPN DCR Voice SACCH (CRC ERR)
+10:15:34 Sync: IDAS D  RTCH2 Data   SCCH
+10:15:34 Sync: +dPMR  dPMR Frame Sync 2 
+ TG=(CRC ERR) Src=(CRC ERR) Channel Code =(CRC ERR) Scrambler
+SPS hunt: trying 5 sps (sym=9600, demod=48000)
+SPS hunt: trying 8 sps (sym=6000, demod=48000)
+SPS hunt: trying 10 sps (sym=4800, demod=48000)
+SPS hunt: trying 10 sps (sym=4800, demod=48000)
+10:15:34 Sync: +M17 BRT 
+10:15:34 Sync: -M17 BRT 
+10:15:34 Sync: +P25p1 NAC/CC: 293;  LDU1  
+ Group Voice Channel User - Group 1 Source 1
+10:15:34 Sync: +P25p1 NAC/CC: 293;  TDU
+Sync: no sync
+SPS hunt: trying 20 sps (sym=2400, demod=48000)
+NOTICE: 
+NOTICE: Total audio errors: 44
+NOTICE: Total header errors: 36
+NOTICE: Total irrecoverable header errors: 0
+NOTICE: Exiting.

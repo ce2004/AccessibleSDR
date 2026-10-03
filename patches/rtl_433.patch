@@ -1,0 +1,14 @@
+diff --git a/src/rtl_433.c b/src/rtl_433.c
+index c8bb91d..f485df5 100644
+--- a/src/rtl_433.c
++++ b/src/rtl_433.c
+@@ -1730,6 +1730,9 @@ int main(int argc, char **argv) {
+             }
+             else if (strcmp(demod->load_info.path, "-") == 0) { // read samples from stdin
+                 in_file = stdin;
++#ifdef _WIN32
++                _setmode(_fileno(stdin), _O_BINARY); // SDR local change: raw samples, not text
++#endif
+                 cfg->in_filename = "<stdin>";
+             } else {
+                 in_file = fopen(demod->load_info.path, "rb");

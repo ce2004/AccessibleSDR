@@ -1,0 +1,415 @@
+diff --git a/acarsdec.c b/acarsdec.c
+index c19d871..5b24cf8 100644
+--- a/acarsdec.c
++++ b/acarsdec.c
+@@ -56,6 +56,9 @@
+ #ifdef WITH_SNDFILE
+  #include "soundfile.h"
+ #endif
++#ifdef WITH_STDIN
++ #include "rawstdin.h"	// SDR local change: raw s16le stdin input
++#endif
+ 
+ runtime_t R = {
+ 	.mdly = 600,
+@@ -71,6 +74,9 @@ static void print_available_ins(void)
+ #endif
+ #ifdef WITH_SNDFILE
+ 		"[--sndfile <file.wav>]",
++#endif
++#ifdef WITH_STDIN
++		"[--stdin]",	// SDR local change
+ #endif
+ 	};
+ 
+@@ -150,6 +156,11 @@ static void usage(void)
+ 	fprintf(stderr, "\n --sndfile <file>\t: decode from <file> sampled at a multiple of %u Hz\n", INTRATE);
+ 	fprintf(stderr, " see \"--sndfile help\" for details\n");
+ #endif
++#ifdef WITH_STDIN
++	// SDR local change
++	fprintf(stderr, "\n --stdin\t\t: decode one channel of AM-demodulated raw s16le mono audio from stdin\n"
++		" -m <rateMult>\t\t: stdin sample rate is <rateMult> * %u Hz (default: 4, i.e. 48000 Hz)\n", INTRATE);
++#endif
+ #ifdef WITH_RTL
+ 	fprintf(stderr,
+ 		"\n rtlopts:\n"
+@@ -274,6 +285,9 @@ int main(int argc, char **argv)
+ #ifdef WITH_SNDFILE
+ 		{ "sndfile", required_argument, NULL, IN_SNDFILE },
+ #endif
++#ifdef WITH_STDIN
++		{ "stdin", no_argument, NULL, IN_STDIN },	// SDR local change
++#endif
+ #ifdef WITH_RTL
+ 		{ "rtlsdr", required_argument, NULL, IN_RTL },
+ #endif
+@@ -342,6 +356,13 @@ int main(int argc, char **argv)
+ 			R.inmode = IN_SNDFILE;
+ 			inarg = optarg;
+ 			break;
++#endif
++#ifdef WITH_STDIN
++		case IN_STDIN:	// SDR local change
++			if (R.inmode)
++				errx(-1, "Only 1 input allowed");
++			R.inmode = IN_STDIN;
++			break;
+ #endif
+ 		case 'g':
+ 			R.gain = atof(optarg);
+@@ -440,6 +461,11 @@ int main(int argc, char **argv)
+ 		res = initSoundfile(inarg);
+ 		break;
+ #endif
++#ifdef WITH_STDIN
++	case IN_STDIN:	// SDR local change
++		res = initRawStdin(inarg);
++		break;
++#endif
+ #ifdef WITH_RTL
+ 	case IN_RTL:
+ 		res = initRtl(inarg);
+@@ -526,6 +552,11 @@ int main(int argc, char **argv)
+ 		res = runSoundfileSample();
+ 		break;
+ #endif
++#ifdef WITH_STDIN
++	case IN_STDIN:	// SDR local change
++		res = runRawStdinSample();
++		break;
++#endif
+ #ifdef WITH_RTL
+ 	case IN_RTL:
+ 		runRtlSample();
+diff --git a/acarsdec.h b/acarsdec.h
+index 956ecfc..d3bc931 100644
+--- a/acarsdec.h
++++ b/acarsdec.h
+@@ -152,7 +152,7 @@ typedef struct {
+ 	output_t *outputs;
+ 	char *idstation;
+ 
+-	enum { IN_NONE = 0, IN_ALSA, IN_SNDFILE, IN_RTL, IN_AIR, IN_SDRPLAY, IN_SOAPY } inmode;
++	enum { IN_NONE = 0, IN_ALSA, IN_SNDFILE, IN_RTL, IN_AIR, IN_SDRPLAY, IN_SOAPY, IN_STDIN /* SDR local change */ } inmode;
+ 
+ 	// used only during setup
+ 	float gain;
+diff --git a/rawstdin.c b/rawstdin.c
+new file mode 100644
+index 0000000..91e4b2e
+--- /dev/null
++++ b/rawstdin.c
+@@ -0,0 +1,98 @@
++/*
++ * SDR local change: raw audio input from stdin.
++ *
++ * Reads single-channel signed 16-bit little-endian PCM (already AM-demodulated by the
++ * caller) from stdin at INTRATE * rateMult Hz (-m, default 4 => 48000 Hz; -m 1 => 12000 Hz)
++ * and feeds it through the same path as the libsndfile input (box-average decimation to
++ * INTRATE, half-scale normalisation, demodMSK). Built only when WITH_STDIN is defined.
++ *
++ * This code is free software; you can redistribute it and/or modify it under the terms of
++ * the GNU Library General Public License version 2.
++ */
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <stdint.h>
++#include <string.h>
++#ifdef _WIN32
++#include <io.h>
++#include <fcntl.h>
++#endif
++#include "acarsdec.h"
++#include "msk.h"
++#include "rawstdin.h"
++
++#define MAXNBFRAMES 4096
++
++#define ERRPFX	"ERROR: STDIN: "
++
++int initRawStdin(char *optarg)
++{
++	(void)optarg;
++
++	if (!R.rateMult)
++		R.rateMult = 4U;	// 48000 Hz
++
++#ifdef _WIN32
++	// the Windows CRT opens stdin in text mode: 0x1A would end the stream and CR/LF get folded
++	_setmode(_fileno(stdin), _O_BINARY);
++#endif
++
++	R.channels = calloc(1, sizeof(*R.channels));
++	if (!R.channels) {
++		perror(NULL);
++		return -1;
++	}
++	R.nbch = 1;
++
++	R.channels[0].dm_buffer = malloc(sizeof(*R.channels[0].dm_buffer) * MAXNBFRAMES);
++	if (!R.channels[0].dm_buffer) {
++		perror(NULL);
++		return -1;
++	}
++
++	fprintf(stderr, "stdin: s16le mono at %u Hz\n", INTRATE * R.rateMult);
++	return 0;
++}
++
++int runRawStdinSample(void)
++{
++	const unsigned int mult = R.rateMult;
++	int16_t *raw = malloc(sizeof(*raw) * MAXNBFRAMES * mult);
++	size_t have = 0;	// samples currently in raw[]
++	unsigned int i, j, nbi;
++	float d;
++
++	if (!raw) {
++		perror(NULL);
++		return -1;
++	}
++
++	while (R.running) {
++		size_t n = fread(raw + have, sizeof(*raw), (size_t)MAXNBFRAMES * mult - have, stdin);
++		if (!n)
++			break;
++		have += n;
++
++		nbi = (unsigned int)(have / mult);
++		if (!nbi)
++			continue;
++
++		for (i = 0; i < nbi; i++) {
++			for (d = 0, j = 0; j < mult; j++) {
++				const uint8_t *p = (const uint8_t *)&raw[i * mult + j];
++				d += (float)(int16_t)(p[0] | (p[1] << 8)) / 32768.0F;	// little endian
++			}
++			R.channels[0].dm_buffer[i] = d / mult / 2;	// normalize to half-scale like sndfile input
++		}
++		demodMSK(&R.channels[0], nbi);
++
++		// keep any leftover partial group
++		size_t used = (size_t)nbi * mult;
++		memmove(raw, raw + used, (have - used) * sizeof(*raw));
++		have -= used;
++	}
++
++	free(raw);
++	return 0;
++}
+diff --git a/rawstdin.h b/rawstdin.h
+new file mode 100644
+index 0000000..5bff5c2
+--- /dev/null
++++ b/rawstdin.h
+@@ -0,0 +1,8 @@
++/* SDR local change: raw s16le mono audio input from stdin */
++#ifndef rawstdin_h
++#define rawstdin_h
++
++int initRawStdin(char *optarg);
++int runRawStdinSample(void);
++
++#endif /* rawstdin_h */
+diff --git a/win32/err.h b/win32/err.h
+new file mode 100644
+index 0000000..031f3ec
+--- /dev/null
++++ b/win32/err.h
+@@ -0,0 +1,24 @@
++/* SDR local change: BSD <err.h> shim for mingw-w64 */
++#ifndef SDR_ERR_H
++#define SDR_ERR_H
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdarg.h>
++#include <string.h>
++#include <errno.h>
++
++static inline void sdr_vwarn(int with_errno, const char *fmt, va_list ap)
++{
++	int e = errno;
++	fputs("acarsdec: ", stderr);
++	if (fmt)
++		vfprintf(stderr, fmt, ap);
++	if (with_errno)
++		fprintf(stderr, "%s%s", fmt ? ": " : "", strerror(e));
++	fputc('\n', stderr);
++}
++static inline void warn(const char *fmt, ...) { va_list ap; va_start(ap, fmt); sdr_vwarn(1, fmt, ap); va_end(ap); }
++static inline void warnx(const char *fmt, ...) { va_list ap; va_start(ap, fmt); sdr_vwarn(0, fmt, ap); va_end(ap); }
++static inline void err(int code, const char *fmt, ...) { va_list ap; va_start(ap, fmt); sdr_vwarn(1, fmt, ap); va_end(ap); exit(code); }
++static inline void errx(int code, const char *fmt, ...) { va_list ap; va_start(ap, fmt); sdr_vwarn(0, fmt, ap); va_end(ap); exit(code); }
++#endif
+diff --git a/win32/netdb.h b/win32/netdb.h
+new file mode 100644
+index 0000000..e30280b
+--- /dev/null
++++ b/win32/netdb.h
+@@ -0,0 +1,7 @@
++/* SDR local change: map POSIX socket headers to Winsock for mingw-w64 */
++#ifndef SDR_NETDB_H
++#define SDR_NETDB_H
++#define WIN32_LEAN_AND_MEAN
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#endif
+diff --git a/win32/sdr_compat.c b/win32/sdr_compat.c
+new file mode 100644
+index 0000000..818af37
+--- /dev/null
++++ b/win32/sdr_compat.c
+@@ -0,0 +1,61 @@
++/* SDR local change: POSIX helpers missing from mingw-w64, for the native Windows build. */
++#ifdef _WIN32
++#define SDR_COMPAT_IMPL
++#undef gethostname	/* the force-included sdr_compat.h redirects it here */
++#define WIN32_LEAN_AND_MEAN
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#include <stdio.h>
++#include <string.h>
++#include <signal.h>
++
++static void sdr_wsa_init(void)
++{
++	static int done;
++	WSADATA w;
++	if (!done) {
++		WSAStartup(MAKEWORD(2, 2), &w);
++		done = 1;
++	}
++}
++
++/* runs before main(): netout/statsd call getaddrinfo()/socket() directly */
++__attribute__((constructor)) static void sdr_compat_init(void)
++{
++	sdr_wsa_init();
++}
++
++int sdr_gethostname(char *name, int len)
++{
++	sdr_wsa_init();
++	if (gethostname(name, len) != 0) {
++		strncpy(name, "acarsdec", len);
++		return -1;
++	}
++	return 0;
++}
++
++char *strsep(char **stringp, const char *delim)
++{
++	char *s = *stringp, *e;
++	if (!s)
++		return NULL;
++	e = s + strcspn(s, delim);
++	if (*e)
++		*e++ = '\0';
++	else
++		e = NULL;
++	*stringp = e;
++	return s;
++}
++
++const char *strsignal(int sig)
++{
++	switch (sig) {
++	case SIGINT: return "SIGINT";
++	case SIGTERM: return "SIGTERM";
++	case SIGBREAK: return "SIGBREAK";
++	default: return "signal";
++	}
++}
++#endif
+diff --git a/win32/sdr_compat.h b/win32/sdr_compat.h
+new file mode 100644
+index 0000000..ee6e273
+--- /dev/null
++++ b/win32/sdr_compat.h
+@@ -0,0 +1,55 @@
++/* SDR local change: force-included (-include) POSIX shims for the native Windows ARM64
++ * llvm-mingw build. Only what acarsdec actually uses. */
++#ifndef SDR_COMPAT_H
++#define SDR_COMPAT_H
++#ifdef _WIN32
++
++#include <signal.h>
++#include <string.h>
++#include <time.h>
++
++#define ffs __builtin_ffs
++
++static inline char *sdr_stpcpy(char *d, const char *s)
++{
++	size_t n = strlen(s);
++	memcpy(d, s, n + 1);
++	return d + n;
++}
++#define stpcpy sdr_stpcpy
++
++/* struct timeval.tv_sec is a 32-bit long on Windows but time_t is 64-bit:
++ * take the value so gmtime_r(&tv.tv_sec, ...) works for both */
++static inline struct tm *sdr_gmtime_r(time_t t, struct tm *tm)
++{
++	return gmtime_s(tm, &t) ? NULL : tm;
++}
++#define gmtime_r(tp, tm) sdr_gmtime_r((time_t)*(tp), (tm))
++
++#ifndef SIGQUIT
++#define SIGQUIT SIGBREAK
++#endif
++
++struct sigaction {
++	void (*sa_handler)(int);
++	int sa_mask;
++	int sa_flags;
++};
++#define sigemptyset(m) (*(m) = 0, 0)
++static inline int sigaction(int sig, const struct sigaction *act, struct sigaction *old)
++{
++	(void)old;
++	return signal(sig, act->sa_handler) == SIG_ERR ? -1 : 0;
++}
++
++char *strsep(char **stringp, const char *delim);
++const char *strsignal(int sig);
++
++/* winsock needs WSAStartup before gethostname()/getaddrinfo(); done in sdr_compat.c */
++int sdr_gethostname(char *name, int len);
++#ifndef SDR_COMPAT_IMPL
++#define gethostname sdr_gethostname
++#endif
++
++#endif /* _WIN32 */
++#endif /* SDR_COMPAT_H */
+diff --git a/win32/sys/socket.h b/win32/sys/socket.h
+new file mode 100644
+index 0000000..417970f
+--- /dev/null
++++ b/win32/sys/socket.h
+@@ -0,0 +1,2 @@
++/* SDR local change: map POSIX socket headers to Winsock for mingw-w64 */
++#include "../netdb.h"
+diff --git a/win32/sysexits.h b/win32/sysexits.h
+new file mode 100644
+index 0000000..2e248ab
+--- /dev/null
++++ b/win32/sysexits.h
+@@ -0,0 +1,15 @@
++/* SDR local change: BSD <sysexits.h> shim for mingw-w64 */
++#ifndef SDR_SYSEXITS_H
++#define SDR_SYSEXITS_H
++#define EX_OK 0
++#define EX_USAGE 64
++#define EX_DATAERR 65
++#define EX_NOINPUT 66
++#define EX_UNAVAILABLE 69
++#define EX_SOFTWARE 70
++#define EX_OSERR 71
++#define EX_OSFILE 72
++#define EX_CANTCREAT 73
++#define EX_IOERR 74
++#define EX_CONFIG 78
++#endif

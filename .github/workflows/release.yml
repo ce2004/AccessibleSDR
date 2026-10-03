@@ -1,0 +1,60 @@
+name: release
+
+# Pushing a tag like v1.0.1 builds both Windows versions and attaches them to that release.
+# The app's updater downloads AccessibleSDR-<version>-win-<arch>.zip from the latest release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache vcpkg libraries
+        uses: actions/cache@v4
+        with:
+          path: vcpkg
+          key: vcpkg-${{ matrix.arch }}-v1
+
+      - name: Fetch sources, toolchain and libraries
+        shell: cmd
+        run: fetch-sources.cmd
+
+      - name: Build
+        shell: cmd
+        run: build-all.cmd
+
+      - name: Package
+        shell: cmd
+        run: make-release.cmd
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "AccessibleSDR $GITHUB_REF_NAME. Download the zip for your PC: win-x64 for most PCs, win-arm64 for Snapdragon PCs."
+          gh release upload "$GITHUB_REF_NAME" release/*.zip --clobber
+
+      - name: Keep the zip as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AccessibleSDR-${{ matrix.arch }}
+          path: release/*.zip

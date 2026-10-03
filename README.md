@@ -48,12 +48,13 @@ Keys
 - D: decoders on or off. Shift D: speaking decodes on or off.
 - R: read the latest decodes, older each press.
 - Z: set your location by ZIP code.
+- O: choose the audio output device. Up and Down move through the devices, Enter uses the one you're on, Escape goes back without changing. The choice is remembered.
 - Alt F4: close.
 
 
 Files it keeps
 
-Next to tuner.exe: saved.txt (your saved frequencies), found.txt (what Explore found), lockouts.txt, location.txt and decodes.txt (a log of everything decoded). Updates never touch these.
+Next to tuner.exe: saved.txt (your saved frequencies), found.txt (what Explore found), lockouts.txt, location.txt, outdev.txt (your output device) and decodes.txt (a log of everything decoded). Updates never touch these.
 
 
 Building from source

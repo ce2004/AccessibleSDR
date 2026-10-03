@@ -11,6 +11,6 @@ cl /nologo /O2 /W3 "%T%\play.c" %O% /Fe"%BIN%\play.exe" winmm.lib || exit /b 1
 cl /nologo /O2 /fp:fast /W3 /D_CRT_SECURE_NO_WARNINGS "%T%\wfm.c" %O% /Fe"%BIN%\wfm.exe" %RTL% winmm.lib || exit /b 1
 cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS "%T%\iqcap.c" %O% /Fe"%BIN%\iqcap.exe" %RTL% || exit /b 1
 cl /nologo /O2 /fp:fast /W3 /D_CRT_SECURE_NO_WARNINGS "%T%\tuner.c" /I"%ROOT%\src\nrsc5\include" /I"%ROOT%\deps\sdrplay" %O% /Fe"%BIN%\tuner.exe" %RTL% ^
-  winmm.lib user32.lib ws2_32.lib setupapi.lib newdev.lib winhttp.lib shell32.lib advapi32.lib /link /SUBSYSTEM:WINDOWS || exit /b 1
+  winmm.lib user32.lib ws2_32.lib setupapi.lib newdev.lib winhttp.lib shell32.lib advapi32.lib ole32.lib /link /SUBSYSTEM:WINDOWS || exit /b 1
 copy /y "%ROOT%\deps\nvdaControllerClient-%ARCH%.dll" "%BIN%\nvdaControllerClient.dll" >nul || exit /b 1
 echo BUILD OK

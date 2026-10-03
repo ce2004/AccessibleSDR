@@ -20,6 +20,9 @@
 #include <newdev.h>
 #include <winhttp.h>
 #include <shellapi.h>
+#include <initguid.h>              /* so the audio-endpoint GUIDs below are defined here */
+#include <mmdeviceapi.h>
+#include <functiondiscoverykeys_devpkey.h>
 #include "rtl-sdr.h"
 #include "nrsc5.h"
 #include "sdrplay_api.h"          /* types only: the SDRplay DLL is loaded at run time if installed */
@@ -27,7 +30,7 @@
 #define WSTR2(x) L##x
 #define WSTR(x) WSTR2(x)
 #ifndef TUNER_VERSION             /* (a test build can pass an older one: /DTUNER_VERSION=\"0.0.1\") */
-#define TUNER_VERSION "1.0.1"
+#define TUNER_VERSION "1.0.2"
 #endif
 #define UPDATE_REPO   "ce2004/AccessibleSDR"
 #if defined(_M_ARM64)
@@ -365,6 +368,7 @@ static rtlsdr_dev_t *volatile dev;      /* non-NULL while a radio is open (a pla
 /* one set of radio controls for both kinds of radio (defined with the SDRplay code below) */
 static volatile int g_rsp;               /* the open radio is an SDRplay RSP */
 static HANDLE g_job;                     /* kill-on-close job holding us and our decoders */
+static volatile UINT g_out_dev;          /* chosen output device (defined with the audio output code) */
 static void rad_freq(uint32_t hz);
 static void rad_rate(uint32_t rate);
 static void rad_gain(int tenths_db);     /* RTL-SDR only: the RSP runs its own gain control */
@@ -543,7 +547,8 @@ static DWORD WINAPI sfx_thread(LPVOID p)
     wf.wBitsPerSample = 16; wf.nBlockAlign = 4; wf.nAvgBytesPerSec = SFX_RATE * 4;
     HANDLE done = CreateEventW(NULL, FALSE, FALSE, NULL);
     HWAVEOUT wo;
-    if (waveOutOpen(&wo, WAVE_MAPPER, &wf, (DWORD_PTR)done, 0, CALLBACK_EVENT) == MMSYSERR_NOERROR) {
+    if (waveOutOpen(&wo, g_out_dev, &wf, (DWORD_PTR)done, 0, CALLBACK_EVENT) == MMSYSERR_NOERROR ||
+        waveOutOpen(&wo, WAVE_MAPPER, &wf, (DWORD_PTR)done, 0, CALLBACK_EVENT) == MMSYSERR_NOERROR) {
         WAVEHDR h = {0};
         h.lpData = (LPSTR)pcm; h.dwBufferLength = (DWORD)len * 4;
         waveOutPrepareHeader(wo, &h, sizeof h);
@@ -563,27 +568,113 @@ typedef struct {
     HWAVEOUT wo; WAVEHDR hdr[NBUF]; int frames, fill_idx, fill_frames, queued, started;
     int max_queue, start_after;     /* latency cap: buffers beyond this are dropped */
     int underruns, drops;           /* counted for tests */
+    int rate; LONG gen;             /* sample rate; output-device generation it was opened for */
 } out_t;
 static volatile LONG g_retunes;
 static out_t ana, hda, nar;
 
+/* the chosen output device (O): WAVE_MAPPER is Windows' default. Changing it bumps g_out_gen and
+   each stream reopens itself on its next buffer, from the thread that writes it. */
+static volatile UINT g_out_dev = WAVE_MAPPER;
+static volatile LONG g_out_gen;
+
 static int busy(WAVEHDR *h) { return (h->dwFlags & WHDR_PREPARED) && !(h->dwFlags & WHDR_DONE); }
+
+static int out_device_open(out_t *o)
+{
+    WAVEFORMATEX wf = {0};
+    wf.wFormatTag = WAVE_FORMAT_PCM; wf.nChannels = 2; wf.nSamplesPerSec = o->rate;
+    wf.wBitsPerSample = 16; wf.nBlockAlign = 4; wf.nAvgBytesPerSec = o->rate * 4;
+    o->gen = g_out_gen;
+    if (waveOutOpen(&o->wo, g_out_dev, &wf, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR &&
+        waveOutOpen(&o->wo, WAVE_MAPPER, &wf, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR) { o->wo = NULL; return 0; }
+    waveOutPause(o->wo);
+    o->started = 0; o->queued = 0; o->fill_idx = 0; o->fill_frames = 0;
+    for (int i = 0; i < NBUF; i++) o->hdr[i].dwFlags = WHDR_DONE;
+    return 1;
+}
 
 static int out_open(out_t *o, int rate, int frames, int max_queue, int start_after)
 {
-    o->max_queue = max_queue; o->start_after = start_after;
-    WAVEFORMATEX wf = {0};
-    wf.wFormatTag = WAVE_FORMAT_PCM; wf.nChannels = 2; wf.nSamplesPerSec = rate;
-    wf.wBitsPerSample = 16; wf.nBlockAlign = 4; wf.nAvgBytesPerSec = rate * 4;
-    if (waveOutOpen(&o->wo, WAVE_MAPPER, &wf, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR) return 0;
-    waveOutPause(o->wo);
-    o->frames = frames;
-    for (int i = 0; i < NBUF; i++) { o->hdr[i].lpData = calloc(frames, 4); o->hdr[i].dwFlags = WHDR_DONE; }
-    return 1;
+    o->max_queue = max_queue; o->start_after = start_after; o->rate = rate; o->frames = frames;
+    for (int i = 0; i < NBUF; i++) o->hdr[i].lpData = calloc(frames, 4);
+    return out_device_open(o);
+}
+
+static void out_reopen(out_t *o)
+{
+    if (o->wo) {
+        waveOutReset(o->wo);
+        for (int i = 0; i < NBUF; i++) if (o->hdr[i].dwFlags & WHDR_PREPARED) waveOutUnprepareHeader(o->wo, &o->hdr[i], sizeof o->hdr[i]);
+        waveOutClose(o->wo);
+        o->wo = NULL;
+    }
+    out_device_open(o);
+}
+
+/* output devices with their full names (the old waveOut name stops at 31 characters, so ask the
+   audio endpoint behind each device for its friendly name) */
+#define MAX_OUTS 32
+/* defined here: mmdeviceapi.h is already pulled in by other headers, so it only declares these */
+static const CLSID SDR_CLSID_MMDeviceEnumerator = { 0xBCDE0395, 0xE52F, 0x467C, { 0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E } };
+static const IID SDR_IID_IMMDeviceEnumerator = { 0xA95664D2, 0x9614, 0x4F35, { 0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6 } };
+static int out_list(wchar_t names[][160], int max)
+{
+    int n = (int)waveOutGetNumDevs();
+    if (n > max) n = max;
+    IMMDeviceEnumerator *en = NULL;
+    HRESULT co = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    CoCreateInstance(&SDR_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, &SDR_IID_IMMDeviceEnumerator, (void **)&en);
+    for (int i = 0; i < n; i++) {
+        WAVEOUTCAPSW caps; names[i][0] = 0;
+        if (waveOutGetDevCapsW(i, &caps, sizeof caps) == MMSYSERR_NOERROR) wcsncpy(names[i], caps.szPname, 159);
+        ULONG sz = 0;
+        if (en && waveOutMessage((HWAVEOUT)(UINT_PTR)i, 0x0812 /* DRV_QUERYFUNCTIONINSTANCEIDSIZE */, (DWORD_PTR)&sz, 0) == MMSYSERR_NOERROR && sz) {
+            wchar_t *id = malloc(sz);
+            if (id && waveOutMessage((HWAVEOUT)(UINT_PTR)i, 0x0811 /* DRV_QUERYFUNCTIONINSTANCEID */, (DWORD_PTR)id, sz) == MMSYSERR_NOERROR) {
+                IMMDevice *d = NULL; IPropertyStore *ps = NULL;
+                if (SUCCEEDED(en->lpVtbl->GetDevice(en, id, &d)) && SUCCEEDED(d->lpVtbl->OpenPropertyStore(d, STGM_READ, &ps))) {
+                    PROPVARIANT v; PropVariantInit(&v);
+                    if (SUCCEEDED(ps->lpVtbl->GetValue(ps, &PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR) wcsncpy(names[i], v.pwszVal, 159);
+                    PropVariantClear(&v);
+                }
+                if (ps) ps->lpVtbl->Release(ps);
+                if (d) d->lpVtbl->Release(d);
+            }
+            free(id);
+        }
+        names[i][159] = 0;
+    }
+    if (en) en->lpVtbl->Release(en);
+    if (SUCCEEDED(co)) CoUninitialize();
+    return n;
+}
+
+/* outdev.txt beside presets.txt keeps the chosen device by name (numbers change as devices come and go) */
+static void out_path(wchar_t *p, size_t n);
+static void out_save(const wchar_t *name)
+{
+    wchar_t p[MAX_PATH]; out_path(p, MAX_PATH);
+    FILE *fp = _wfopen(p, L"w, ccs=UTF-8");
+    if (fp) { fwprintf(fp, L"%ls\n", name ? name : L""); fclose(fp); }
+}
+static void out_load(void)
+{
+    wchar_t p[MAX_PATH], want[160] = L""; out_path(p, MAX_PATH);
+    FILE *fp = _wfopen(p, L"r, ccs=UTF-8");
+    if (!fp) return;
+    if (fgetws(want, 160, fp)) want[wcscspn(want, L"\r\n")] = 0;
+    fclose(fp);
+    if (!want[0]) return;
+    static wchar_t names[MAX_OUTS][160];
+    int n = out_list(names, MAX_OUTS);
+    for (int i = 0; i < n; i++) if (!wcscmp(names[i], want)) { g_out_dev = i; break; }
 }
 
 static void out_frame(out_t *o, short l, short r)
 {
+    if (o->gen != g_out_gen) out_reopen(o);                 /* the output device was changed (O) */
+    if (!o->wo) return;
     WAVEHDR *h = &o->hdr[o->fill_idx];
     if (o->fill_frames == 0 && busy(h)) return;            /* output is behind: drop */
     short *p = (short *)h->lpData + 2 * o->fill_frames;
@@ -3606,6 +3697,56 @@ static int input_box(HWND parent, const wchar_t *title, const wchar_t *label, ch
     return DialogBoxIndirectW(GetModuleHandleW(NULL), dt, parent, ib_proc) == 1;
 }
 
+static void out_path(wchar_t *p, size_t n)
+{
+    MultiByteToWideChar(CP_ACP, 0, saved_path, -1, p, (int)n);
+    wchar_t *s = wcsrchr(p, L'\\');
+    if (s) wcscpy_s(s + 1, n - (s + 1 - p), L"outdev.txt");
+}
+
+/* ---------- O: the output device picker ---------- */
+static int g_picker, g_pick_idx, g_pick_n;              /* entry 0 is the Windows default */
+static wchar_t g_pick_names[MAX_OUTS][160];
+
+static void picker_say(void)
+{
+    wchar_t w[300]; char t[600];
+    const wchar_t *name = g_pick_idx == 0 ? L"Windows default" : g_pick_names[g_pick_idx - 1];
+    int cur = (g_out_dev == WAVE_MAPPER && g_pick_idx == 0) || (g_out_dev != WAVE_MAPPER && g_pick_idx == (int)g_out_dev + 1);
+    swprintf(w, 300, L"%ls%ls, %d of %d", name, cur ? L", current" : L"", g_pick_idx + 1, g_pick_n + 1);
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, t, sizeof t, NULL, NULL);
+    say(t);
+}
+
+static void picker_open(void)
+{
+    g_pick_n = out_list(g_pick_names, MAX_OUTS);
+    g_pick_idx = g_out_dev == WAVE_MAPPER || (int)g_out_dev >= g_pick_n ? 0 : (int)g_out_dev + 1;
+    g_picker = 1;
+    say("Output device");
+    picker_say();
+}
+
+/* handles a key while the picker is open; returns 1 if it used the key */
+static int picker_key(WPARAM wp)
+{
+    if (wp == VK_UP || wp == VK_LEFT) { if (g_pick_idx > 0) g_pick_idx--; else beep(0); picker_say(); return 1; }
+    if (wp == VK_DOWN || wp == VK_RIGHT) { if (g_pick_idx < g_pick_n) g_pick_idx++; else beep(0); picker_say(); return 1; }
+    if (wp == VK_HOME) { g_pick_idx = 0; picker_say(); return 1; }
+    if (wp == VK_END) { g_pick_idx = g_pick_n; picker_say(); return 1; }
+    if (wp == VK_ESCAPE) { g_picker = 0; say("Output unchanged"); return 1; }
+    if (wp == VK_RETURN) {
+        g_picker = 0;
+        g_out_dev = g_pick_idx == 0 ? WAVE_MAPPER : (UINT)(g_pick_idx - 1);
+        InterlockedIncrement(&g_out_gen);                 /* every stream moves over on its next buffer */
+        out_save(g_pick_idx == 0 ? L"" : g_pick_names[g_pick_idx - 1]);
+        char t[400]; WideCharToMultiByte(CP_UTF8, 0, g_pick_idx == 0 ? L"Windows default" : g_pick_names[g_pick_idx - 1], -1, t, sizeof t, NULL, NULL);
+        beep(3); say(t);
+        return 1;
+    }
+    return 1;                                             /* other keys wait until the picker closes */
+}
+
 /* "12345" (a US ZIP code) or "40.0 -90.0" / "40.0, -90.0" (latitude longitude) */
 static int set_location(const char *text, char *said, size_t n)
 {
@@ -3752,6 +3893,8 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_KEYDOWN: {
         int repeat = (lp >> 30) & 1, shift = GetKeyState(VK_SHIFT) < 0;
         mode_params(g_mode, g_station, &tap, &fine, &glide, &gmax);
+        if (g_picker) { picker_key(wp); return 0; }       /* the output device picker has the keys */
+        if (wp == 'O') { picker_open(); return 0; }
         if (wp == 'S') {
             if (shift) { g_squelch = (g_squelch + 1) % 4; say(squelch_names[g_squelch]); return 0; }
             if (g_scan_req || scan_active) { g_scan_req = 0; say("Scan stopped"); }
@@ -4132,6 +4275,12 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             g_scan_req = 1;                                            /* on to the next one */
             return 0;
         }
+        if (wp == 6) {                                                 /* test: switch output device mid-play */
+            KillTimer(h, 6);
+            char e[16] = ""; GetEnvironmentVariableA("SDR_TEST_OUTSWITCH", e, sizeof e);
+            g_out_dev = (UINT)atoi(e); InterlockedIncrement(&g_out_gen);
+            return 0;
+        }
         if (wp == 3) {                                                 /* --listen: time's up */
             char path[MAX_PATH]; snprintf(path, sizeof path, "%s", dec_log_path);
             strcpy(strrchr(path, '\\') + 1, "rds_test.log");
@@ -4173,6 +4322,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     timeBeginPeriod(1);                             /* 1 ms sleeps: steady voice pacing */
     load_presets();
     load_lockouts();
+    out_load();                                     /* the output device chosen with O, if still present */
     CreateThread(NULL, 0, location_thread, (LPVOID)saved_path, 0, NULL);
     int test_run = cmd && !strncmp(cmd, "--", 2);
     if (!test_run) CreateThread(NULL, 0, update_thread, NULL, 0, NULL);
@@ -4209,6 +4359,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
         cmd = NULL;
     }
     if (cmd && !strncmp(cmd, "--install-driver", 16)) return install_driver();   /* run elevated by offer_driver */
+    if (cmd && !strncmp(cmd, "--outdevs", 9)) {     /* list output devices as the picker shows them */
+        static wchar_t names[MAX_OUTS][160];
+        int n = out_list(names, MAX_OUTS);
+        FILE *fp = _wfopen(L"outdevs.log", L"w, ccs=UTF-8");
+        if (fp) { fwprintf(fp, L"Windows default\n"); for (int i = 0; i < n; i++) fwprintf(fp, L"%ls\n", names[i]); fclose(fp); }
+        return 0;
+    }
     if (cmd && !strncmp(cmd, "--driver-check", 14)) {
         FILE *fp = fopen("driver_check.log", "w");
         if (fp) { fprintf(fp, "driver state %d (0 none, 1 ok, 2 needs driver), version %s\n", driver_state(), TUNER_VERSION); fclose(fp); }
@@ -4332,6 +4489,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     SetTimer(g_wnd, 1, 350, NULL);
     SetTimer(g_wnd, 4, 40, NULL);                   /* band-edge ticks while gliding */
     if (g_listen_secs) SetTimer(g_wnd, 3, g_listen_secs * 1000, NULL);
+    if (g_listen_secs && GetEnvironmentVariableA("SDR_TEST_OUTSWITCH", NULL, 0)) SetTimer(g_wnd, 6, 4000, NULL);
 
     CreateThread(NULL, 0, retune_thread, NULL, 0, NULL);
     CreateThread(NULL, 0, hd_thread, NULL, 0, NULL);

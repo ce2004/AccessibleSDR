@@ -35,6 +35,7 @@ Test runs start minimized, so they never take the keyboard from someone using th
 - --glide <MHz> <mode> <direction> <seconds>: simulate holding an arrow key.
 - --explore <MHz> <seconds>: press X in that frequency's category. Results go to found.txt.
 - --scantest <MHz> <stops> <squelch>, and --trunk <MHz> <seconds> [DMR color code].
+- --outdevs writes outdevs.log, the output devices as the O picker lists them. With SDR_TEST_OUTSWITCH=<device number>, a --listen run switches to that device 4 seconds in.
 - --sounds plays every sound effect. Also --zip <text>, --driver-check, and --install-driver (needs administrator rights).
 - Set the environment variable SDR_NO_UPDATE=1 to skip the update check.
 

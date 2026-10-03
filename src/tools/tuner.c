@@ -26,7 +26,9 @@
 
 #define WSTR2(x) L##x
 #define WSTR(x) WSTR2(x)
-#define TUNER_VERSION "1.0.0"
+#ifndef TUNER_VERSION             /* (a test build can pass an older one: /DTUNER_VERSION=\"0.0.1\") */
+#define TUNER_VERSION "1.0.1"
+#endif
 #define UPDATE_REPO   "ce2004/AccessibleSDR"
 #if defined(_M_ARM64)
 #define UPDATE_ASSET  "win-arm64.zip"
@@ -362,6 +364,7 @@ static rtlsdr_dev_t *volatile dev;      /* non-NULL while a radio is open (a pla
 
 /* one set of radio controls for both kinds of radio (defined with the SDRplay code below) */
 static volatile int g_rsp;               /* the open radio is an SDRplay RSP */
+static HANDLE g_job;                     /* kill-on-close job holding us and our decoders */
 static void rad_freq(uint32_t hz);
 static void rad_rate(uint32_t rate);
 static void rad_gain(int tenths_db);     /* RTL-SDR only: the RSP runs its own gain control */
@@ -2488,17 +2491,27 @@ static int version_newer(const char *a, const char *b)   /* is a newer than b? "
     return 0;
 }
 
+static void ulog(const char *m)                     /* update steps, for diagnosing a failed update */
+{
+    wchar_t lp[MAX_PATH]; GetModuleFileNameW(NULL, lp, MAX_PATH); wcscpy(wcsrchr(lp, L'\\') + 1, L"update.log");
+    FILE *fp = _wfopen(lp, L"a"); if (fp) { fprintf(fp, "%s\n", m); fclose(fp); }
+}
+
 static DWORD WINAPI update_thread(LPVOID p)
 {
     (void)p;
     wchar_t dir[MAX_PATH]; GetModuleFileNameW(NULL, dir, MAX_PATH); *wcsrchr(dir, L'\\') = 0;
-    {   /* leftovers from the last update */
+    /* leftovers from the last update; the previous copy may still be closing, so keep trying */
+    for (int attempt = 0; attempt < 20; attempt++) {
         wchar_t pat[MAX_PATH]; swprintf(pat, MAX_PATH, L"%s\\*.old", dir);
         WIN32_FIND_DATAW fd; HANDLE fh = FindFirstFileW(pat, &fd);
+        int left = 0;
         if (fh != INVALID_HANDLE_VALUE) {
-            do { wchar_t f[MAX_PATH]; swprintf(f, MAX_PATH, L"%s\\%s", dir, fd.cFileName); DeleteFileW(f); } while (FindNextFileW(fh, &fd));
+            do { wchar_t f[MAX_PATH]; swprintf(f, MAX_PATH, L"%s\\%s", dir, fd.cFileName); if (!DeleteFileW(f)) left++; } while (FindNextFileW(fh, &fd));
             FindClose(fh);
         }
+        if (!left) break;
+        Sleep(1000);
     }
     if (GetEnvironmentVariableA("SDR_NO_UPDATE", NULL, 0)) return 0;
     char *json; DWORD n;
@@ -2514,6 +2527,7 @@ static DWORD WINAPI update_thread(LPVOID p)
     }
     free(json);
     const char *ver = tag[0] == 'v' ? tag + 1 : tag;
+    { char m[700]; snprintf(m, sizeof m, "latest %s url %s", tag, url); ulog(m); }
     if (!tag[0] || !url[0] || !version_newer(ver, TUNER_VERSION)) return 0;
     char msg[128]; snprintf(msg, sizeof msg, "Downloading update, version %s", ver); say(msg);
     wchar_t wurl[512]; MultiByteToWideChar(CP_UTF8, 0, url, -1, wurl, 512);
@@ -2549,6 +2563,7 @@ static DWORD WINAPI update_thread(LPVOID p)
         else MoveFileW(old, dst);                           /* couldn't place it: put the old one back */
     } while (FindNextFileW(fh, &fd));
     FindClose(fh);
+    { char m[64]; snprintf(m, sizeof m, "moved %d files", moved); ulog(m); }
     if (!moved) return 0;
     say("Updated. Restarting.");
     Sleep(1500);
@@ -4007,10 +4022,25 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_APP + 3: update_title(); return 0;       /* trunk following moved the dial */
     case WM_APP + 7: offer_driver(h); return 0;      /* radio plugged in without its driver */
     case WM_APP + 8: {                               /* an update was installed: run the new copy */
+        ulog("restart message");
+        mm_stop(); rt_stop(); ds_stop();             /* our decoders go now; the new copy must outlive us */
+        if (g_job) {                                 /* so our job must stop closing its members when we exit */
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION li = {0};
+            li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+            SetInformationJobObject(g_job, JobObjectExtendedLimitInformation, &li, sizeof li);
+        }
         wchar_t exe[MAX_PATH]; GetModuleFileNameW(NULL, exe, MAX_PATH);
         STARTUPINFOW si = { sizeof si }; PROCESS_INFORMATION pi;
-        if (CreateProcessW(exe, NULL, NULL, NULL, FALSE, CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi) ||
-            CreateProcessW(exe, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+        BOOL ok = CreateProcessW(exe, NULL, NULL, NULL, FALSE, CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi);
+        DWORD e1 = ok ? 0 : GetLastError();
+        if (!ok) ok = CreateProcessW(exe, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+        DWORD e2 = ok ? 0 : GetLastError();
+        if (ok) { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+        {
+            wchar_t lp[MAX_PATH]; GetModuleFileNameW(NULL, lp, MAX_PATH); wcscpy(wcsrchr(lp, L'\\') + 1, L"update.log");
+            FILE *fp = _wfopen(lp, L"a");
+            if (fp) { fprintf(fp, "restart: breakaway err %lu, plain err %lu, ok %d\n", e1, e2, ok); fclose(fp); }
+        }
         DestroyWindow(h);
         return 0;
     }
@@ -4138,6 +4168,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
         li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
         if (job && SetInformationJobObject(job, JobObjectExtendedLimitInformation, &li, sizeof li))
             AssignProcessToJobObject(job, GetCurrentProcess());
+        g_job = job;
     }
     timeBeginPeriod(1);                             /* 1 ms sleeps: steady voice pacing */
     load_presets();

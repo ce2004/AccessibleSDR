@@ -2035,6 +2035,57 @@ static void cp_learn_pair(int lsn, double hz)
     InterlockedIncrement(&cp_map_changed);
 }
 
+/* Speaks Capacity Plus status changes only: the rest channel moving, a channel going busy
+   (with what it carries, e.g. "Group 123") or idle again. A state must read the same twice in
+   a row (one garbled message can't announce anything), and the first status heard is taken
+   silently as the starting point. */
+static void cp_announce(const char *line)
+{
+    static char said[CP_MAX_LSN + 1][48], seen[CP_MAX_LSN + 1][48];
+    static int said_rest, seen_rest;
+    static double system_on;
+    double sys = g_trunk && g_trunk_cc > 0 ? g_trunk_cc : g_station;   /* trunking moves g_station */
+    if (system_on != sys) {                                /* a new system: start over */
+        memset(said, 0, sizeof said); memset(seen, 0, sizeof seen);
+        said_rest = seen_rest = 0; system_on = sys;
+    }
+    const char *p;
+    char msg[160];
+    if ((p = strstr(line, "Rest LSN: "))) {
+        int r = atoi(p + 10);
+        if (r >= 1 && r <= CP_MAX_LSN) {
+            if (r == seen_rest && r != said_rest) {
+                if (said_rest) { snprintf(msg, sizeof msg, "rest channel now %d", r); dec_add(msg); }
+                said_rest = r;
+            }
+            seen_rest = r;
+        }
+        return;
+    }
+    if (!strstr(line, "LSN 0") && !strstr(line, "LSN 1")) return;
+    for (p = strstr(line, "LSN "); p; p = strstr(p + 4, "LSN ")) {
+        int lsn = atoi(p + 4);
+        const char *s = strchr(p, ':');
+        if (lsn < 1 || lsn > CP_MAX_LSN || !s) continue;
+        s++; while (*s == ' ') s++;
+        char st[48]; int i = 0;
+        while (s[i] && s[i] != ';' && i < 47) { st[i] = s[i]; i++; }
+        while (i && st[i - 1] == ' ') i--;
+        st[i] = 0;
+        if (!strcmp(st, "Rest")) strcpy(st, "Idle");       /* the rest channel is announced on its own */
+        if (strstr(st, "ERR")) continue;
+        if (!strcmp(st, seen[lsn]) && strcmp(st, said[lsn])) {
+            if (said[lsn][0]) {                            /* not the first state seen */
+                if (!strcmp(st, "Idle")) snprintf(msg, sizeof msg, "channel %d idle", lsn);
+                else snprintf(msg, sizeof msg, "channel %d busy, %s", lsn, st);
+                dec_add(msg);
+            }
+            snprintf(said[lsn], sizeof said[lsn], "%s", st);
+        }
+        snprintf(seen[lsn], sizeof seen[lsn], "%s", st);
+    }
+}
+
 /* status lines: " Capacity Plus Channel Status ... Rest LSN: 4" and "LSN 01: Idle; LSN 02: Group 123 ..." */
 static void cp_line(const char *line)
 {
@@ -2057,6 +2108,7 @@ static void cp_line(const char *line)
         if (!idle && !cp_freq[lsn]) busy = lsn;
     }
     if (strstr(line, "LSN 0")) cp_busy_unknown = busy;
+    cp_announce(line);
 }
 
 /* spectrum watcher, fed raw IQ while dsd-neo owns the dongle: per-channel idle levels, then

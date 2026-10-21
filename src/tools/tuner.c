@@ -30,7 +30,7 @@
 #define WSTR2(x) L##x
 #define WSTR(x) WSTR2(x)
 #ifndef TUNER_VERSION             /* (a test build can pass an older one: /DTUNER_VERSION=\"0.0.1\") */
-#define TUNER_VERSION "1.0.2"
+#define TUNER_VERSION "1.0.3"
 #endif
 #define UPDATE_REPO   "ce2004/AccessibleSDR"
 #if defined(_M_ARM64)

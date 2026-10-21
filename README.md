@@ -49,12 +49,13 @@ Keys
 - R: read the latest decodes, older each press.
 - Z: set your location by ZIP code.
 - O: choose the audio output device. Up and Down move through the devices, Enter uses the one you're on, Escape goes back without changing. The choice is remembered.
+- Ctrl+P: Preferences. Up and Down move through the list, Space turns an item on or off. High quality digital voice, Announce calls, Sounds, and Start or Stop recording, which saves call audio to the Recordings folder.
 - Alt F4: close.
 
 
 Files it keeps
 
-Next to tuner.exe: saved.txt (your saved frequencies), found.txt (what Explore found), lockouts.txt, location.txt, outdev.txt (your output device) and decodes.txt (a log of everything decoded). Updates never touch these.
+Next to tuner.exe: saved.txt (your saved frequencies), found.txt (what Explore found), lockouts.txt, location.txt, outdev.txt (your output device), prefs.txt (your preferences) and decodes.txt (a log of everything decoded). Updates never touch these.
 
 
 Building from source
